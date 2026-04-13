@@ -1,0 +1,129 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Space Grotesk", sans-serif;
+
+  /* Primary - hijau tetap sama di kedua mode */
+  --color-primary: var(--c-primary);
+  --color-primary-container: var(--c-primary-container);
+  --color-on-primary: var(--c-on-primary);
+  --color-on-primary-container: var(--c-on-primary-container);
+  --color-primary-fixed-dim: var(--c-primary-fixed-dim);
+
+  --color-secondary: var(--c-secondary);
+  --color-secondary-container: var(--c-secondary-container);
+  --color-on-secondary: var(--c-on-secondary);
+
+  --color-tertiary: var(--c-tertiary);
+  --color-tertiary-container: var(--c-tertiary-container);
+
+  --color-error: var(--c-error);
+  --color-error-container: var(--c-error-container);
+  --color-on-error: var(--c-on-error);
+
+  --color-background: var(--c-background);
+  --color-surface: var(--c-surface);
+  --color-surface-container-lowest: var(--c-surface-container-lowest);
+  --color-surface-container-low: var(--c-surface-container-low);
+  --color-surface-container: var(--c-surface-container);
+  --color-surface-container-high: var(--c-surface-container-high);
+  --color-surface-container-highest: var(--c-surface-container-highest);
+  --color-surface-variant: var(--c-surface-variant);
+
+  --color-on-surface: var(--c-on-surface);
+  --color-on-surface-variant: var(--c-on-surface-variant);
+  --color-outline: var(--c-outline);
+  --color-outline-variant: var(--c-outline-variant);
+}
+
+/* ── LIGHT MODE (default) ─────────────────────────────── */
+:root {
+  --c-primary: #1a9e4f;
+  --c-primary-container: #d6f5e3;
+  --c-on-primary: #ffffff;
+  --c-on-primary-container: #003918;
+  --c-primary-fixed-dim: #157a3d;
+
+  --c-secondary: #4a7c59;
+  --c-secondary-container: #d0e8d8;
+  --c-on-secondary: #ffffff;
+
+  --c-tertiary: #c2185b;
+  --c-tertiary-container: #fce4ec;
+
+  --c-error: #b3261e;
+  --c-error-container: #fde8e7;
+  --c-on-error: #ffffff;
+
+  --c-background: #f5f7f5;
+  --c-surface: #ffffff;
+  --c-surface-container-lowest: #f0f4f1;
+  --c-surface-container-low: #f7faf8;
+  --c-surface-container: #eef2ef;
+  --c-surface-container-high: #e4ebe6;
+  --c-surface-container-highest: #d8e2da;
+  --c-surface-variant: #e4ebe6;
+
+  --c-on-surface: #1a1c1a;
+  --c-on-surface-variant: #3d4a3e;
+  --c-outline: #6b7c6d;
+  --c-outline-variant: #b0c4b3;
+}
+
+/* ── DARK MODE ────────────────────────────────────────── */
+.dark {
+  --c-primary: #54e083;
+  --c-primary-container: #007f3e;
+  --c-on-primary: #003918;
+  --c-on-primary-container: #c7ffce;
+  --c-primary-fixed-dim: #3dbd6a;
+
+  --c-secondary: #bacbb9;
+  --c-secondary-container: #3e4d3f;
+  --c-on-secondary: #263427;
+
+  --c-tertiary: #ffb1c7;
+  --c-tertiary-container: #b14b6f;
+
+  --c-error: #ffb4ab;
+  --c-error-container: #93000a;
+  --c-on-error: #690005;
+
+  --c-background: #131313;
+  --c-surface: #131313;
+  --c-surface-container-lowest: #0e0e0e;
+  --c-surface-container-low: #1c1b1b;
+  --c-surface-container: #201f1f;
+  --c-surface-container-high: #2a2a2a;
+  --c-surface-container-highest: #353534;
+  --c-surface-variant: #2a2a2a;
+
+  --c-on-surface: #e5e2e1;
+  --c-on-surface-variant: #bfcaba;
+  --c-outline: #8a9485;
+  --c-outline-variant: #40493d;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface font-sans antialiased transition-colors duration-300;
+  }
+
+  h1, h2, h3, h4, h5, h6, .font-headline {
+    @apply font-headline;
+  }
+}
+
+/* ── Scrollbar ────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--c-surface-container-lowest); }
+::-webkit-scrollbar-thumb {
+  background: var(--c-surface-container-highest);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--c-outline-variant); }
+
+.glass-panel { @apply bg-surface-variant/60 backdrop-blur-xl; }
+.no-line-card { @apply border-none shadow-none; }
