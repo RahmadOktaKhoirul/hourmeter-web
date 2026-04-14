@@ -14,6 +14,17 @@ const reportIconMap: Record<Report['type'], React.ElementType> = {
 
 const emptyForm = { title: '', type: 'Analytics' as Report['type'], file_size: '', business_unit_id: '' };
 
+// Komponen error banner
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-error/10 border border-error/20 rounded-2xl text-sm text-error font-medium">
+      <Icons.AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">{message}</span>
+      <button onClick={onClose} className="text-error/60 hover:text-error transition-colors ml-2 font-bold">✕</button>
+    </div>
+  );
+}
+
 export default function Reports() {
   const [reports, setReports] = useState<Report[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -22,6 +33,7 @@ export default function Reports() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [filterType, setFilterType] = useState<string>('All');
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     const [{ data: r }, { data: bu }] = await Promise.all([
@@ -38,27 +50,41 @@ export default function Reports() {
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await supabase.from('reports').insert({
-      title: form.title, type: form.type,
-      file_size: form.file_size || null,
-      business_unit_id: form.business_unit_id || null,
-    });
-    setSaving(false);
-    setShowAdd(false);
-    setForm(emptyForm);
-    load();
+    setError(null);
+    try {
+      const { error: err } = await supabase.from('reports').insert({
+        title: form.title,
+        type: form.type,
+        file_size: form.file_size || null,
+        business_unit_id: form.business_unit_id || null,
+      });
+      if (err) {
+        setError(`Gagal membuat report: ${err.message}`);
+        return;
+      }
+      setShowAdd(false);
+      setForm(emptyForm);
+      await load();
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleDelete(report: Report) {
     if (!confirm(`Delete report "${report.title}"?`)) return;
-    await supabase.from('reports').delete().eq('id', report.id);
-    load();
+    setError(null);
+    const { error: err } = await supabase.from('reports').delete().eq('id', report.id);
+    if (err) {
+      setError(`Gagal menghapus report: ${err.message}`);
+      return;
+    }
+    await load();
   }
 
   function exportAll() {
     const headers = ['Title', 'Type', 'Business Unit', 'File Size', 'Created At'];
     const rows = reports.map(r => [r.title, r.type, r.business_units?.name ?? '', r.file_size ?? '', new Date(r.created_at).toLocaleDateString()]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const csv = [headers, ...rows].map(r => r.map(field => `"${field}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'reports.csv'; a.click();
@@ -70,7 +96,7 @@ export default function Reports() {
       window.open(report.file_url, '_blank');
     } else {
       // Generate a simple CSV for this report
-      const csv = `Title,${report.title}\nType,${report.type}\nBusiness Unit,${report.business_units?.name ?? ''}\nCreated,${new Date(report.created_at).toLocaleString()}`;
+      const csv = `"Title","${report.title}"\n"Type","${report.type}"\n"Business Unit","${report.business_units?.name ?? ''}"\n"Created","${new Date(report.created_at).toLocaleString()}"`;
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `${report.title.replace(/\s+/g, '-')}.csv`; a.click();
@@ -87,6 +113,7 @@ export default function Reports() {
 
   return (
     <div className="space-y-10">
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-4xl font-black font-headline tracking-tighter text-on-surface">Reports & Analytics</h2>

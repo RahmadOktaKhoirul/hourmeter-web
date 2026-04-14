@@ -12,6 +12,16 @@ const unitIcons = [Icons.Factory, Icons.Wrench, Icons.Globe, Icons.Zap, Icons.Ma
 
 const emptyForm = { name: '', location: '', status: 'Active' as BusinessUnit['status'] };
 
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-error/10 border border-error/20 rounded-2xl text-sm text-error font-medium">
+      <Icons.AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">{message}</span>
+      <button onClick={onClose} className="opacity-60 hover:opacity-100 transition-opacity ml-2 font-bold">✕</button>
+    </div>
+  );
+}
+
 export default function BusinessUnits() {
   const navigate = useNavigate();
   const [units, setUnits] = useState<UnitWithCount[]>([]);
@@ -20,6 +30,7 @@ export default function BusinessUnits() {
   const [editUnit, setEditUnit] = useState<UnitWithCount | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     const [{ data: buData }, { data: machineData }] = await Promise.all([
@@ -41,22 +52,30 @@ export default function BusinessUnits() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    if (editUnit) {
-      await supabase.from('business_units').update(form).eq('id', editUnit.id);
-    } else {
-      await supabase.from('business_units').insert(form);
+    setError(null);
+    try {
+      if (editUnit) {
+        const { error: err } = await supabase.from('business_units').update(form).eq('id', editUnit.id);
+        if (err) { setError(`Gagal menyimpan unit: ${err.message}`); return; }
+      } else {
+        const { error: err } = await supabase.from('business_units').insert(form);
+        if (err) { setError(`Gagal membuat unit: ${err.message}`); return; }
+      }
+      setShowAdd(false);
+      setEditUnit(null);
+      setForm(emptyForm);
+      await load();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowAdd(false);
-    setEditUnit(null);
-    setForm(emptyForm);
-    load();
   }
 
   async function handleDelete(unit: UnitWithCount) {
     if (!confirm(`Delete "${unit.name}"? This will unlink all machines from this unit.`)) return;
-    await supabase.from('business_units').delete().eq('id', unit.id);
-    load();
+    setError(null);
+    const { error: err } = await supabase.from('business_units').delete().eq('id', unit.id);
+    if (err) { setError(`Gagal menghapus unit: ${err.message}`); return; }
+    await load();
   }
 
   function openEdit(unit: UnitWithCount) {
@@ -67,6 +86,7 @@ export default function BusinessUnits() {
 
   return (
     <div className="space-y-10">
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-4xl font-black font-headline tracking-tighter text-on-surface">Business Units</h2>

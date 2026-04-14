@@ -1,11 +1,11 @@
-import { 
-  LayoutDashboard, 
-  Cpu, 
-  Building2, 
-  Users, 
-  BarChart3, 
-  Settings, 
-  HelpCircle, 
+import {
+  LayoutDashboard,
+  Cpu,
+  Building2,
+  Users,
+  BarChart3,
+  Settings,
+  HelpCircle,
   LogOut,
   Search,
   Moon,
@@ -38,7 +38,9 @@ import {
   Mail,
   Eye,
   EyeOff,
-  Factory
+  Factory,
+  Menu,
+  X
 } from 'lucide-react';
 
 export const Icons = {
@@ -81,5 +83,7 @@ export const Icons = {
   Mail: Mail,
   Eye: Eye,
   EyeOff: EyeOff,
-  Factory: Factory
+  Factory: Factory,
+  Menu: Menu,
+  X: X,
 };

@@ -12,8 +12,10 @@ interface LoginProps {
 
 export default function Login({ onLogin, darkMode, onToggleDark }: LoginProps) {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState('');
+  const savedEmail = localStorage.getItem('hm_remembered_email') ?? '';
+  const [email, setEmail] = useState(savedEmail);
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(savedEmail !== '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -39,6 +41,13 @@ export default function Login({ onLogin, darkMode, onToggleDark }: LoginProps) {
       .from('app_users')
       .update({ status: 'Online', last_active_at: new Date().toISOString() })
       .eq('id', data[0].id);
+
+    // Simpan email jika "Remember this device" dicentang
+    if (rememberMe) {
+      localStorage.setItem('hm_remembered_email', email);
+    } else {
+      localStorage.removeItem('hm_remembered_email');
+    }
 
     onLogin(data[0] as AppUser);
   }
@@ -145,6 +154,8 @@ export default function Login({ onLogin, darkMode, onToggleDark }: LoginProps) {
               <input
                 type="checkbox"
                 id="remember"
+                checked={rememberMe}
+                onChange={e => setRememberMe(e.target.checked)}
                 className="w-5 h-5 rounded-lg bg-surface-container-highest border-none text-primary focus:ring-offset-background focus:ring-primary/40 cursor-pointer"
               />
               <label htmlFor="remember" className="text-sm text-on-surface-variant cursor-pointer select-none font-medium">

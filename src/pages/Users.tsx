@@ -16,6 +16,16 @@ function timeAgo(dateStr: string | null) {
 
 const emptyForm = { name: '', email: '', role: 'Operator' as AppUser['role'], status: 'Offline' as AppUser['status'], business_unit_id: '', password: '' };
 
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-error/10 border border-error/20 rounded-2xl text-sm text-error font-medium">
+      <Icons.AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">{message}</span>
+      <button onClick={onClose} className="opacity-60 hover:opacity-100 transition-opacity ml-2 font-bold">✕</button>
+    </div>
+  );
+}
+
 export default function Users() {
   const [users, setUsers] = useState<AppUser[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
@@ -26,6 +36,7 @@ export default function Users() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [filterRole, setFilterRole] = useState<string>('All');
+  const [error, setError] = useState<string | null>(null);
 
   async function load() {
     const [{ data: u }, { data: bu }] = await Promise.all([
@@ -42,37 +53,60 @@ export default function Users() {
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    if (editUser) {
-      await supabase.from('app_users').update({
-        name: form.name, email: form.email, role: form.role,
-        status: form.status, business_unit_id: form.business_unit_id || null,
-      }).eq('id', editUser.id);
-    } else {
-      // Insert with hashed password via RPC or direct insert
-      await supabase.from('app_users').insert({
-        name: form.name, email: form.email, role: form.role,
-        status: form.status, business_unit_id: form.business_unit_id || null,
-        password_hash: form.password, // will be plain — remind to hash via SQL if needed
-      });
+    setError(null);
+    try {
+      if (editUser) {
+        // Update data user (tanpa password)
+        const { error: err } = await supabase.from('app_users').update({
+          name: form.name, email: form.email, role: form.role,
+          status: form.status, business_unit_id: form.business_unit_id || null,
+        }).eq('id', editUser.id);
+        if (err) { setError(`Gagal menyimpan user: ${err.message}`); return; }
+
+        // Jika password diisi saat edit, update hash-nya via RPC
+        if (form.password) {
+          const { error: pwErr } = await supabase.rpc('update_user_password', {
+            p_user_id: editUser.id,
+            p_new_password: form.password,
+          });
+          if (pwErr) { setError(`Gagal mengubah password: ${pwErr.message}`); return; }
+        }
+      } else {
+        // Insert user baru — password di-hash bcrypt di sisi server via RPC
+        const { error: err } = await supabase.rpc('create_app_user', {
+          p_name: form.name,
+          p_email: form.email,
+          p_role: form.role,
+          p_status: form.status,
+          p_business_unit_id: form.business_unit_id || null,
+          p_password: form.password,
+        });
+        if (err) { setError(`Gagal menambahkan user: ${err.message}`); return; }
+      }
+      setShowInvite(false);
+      setEditUser(null);
+      setForm(emptyForm);
+      await load();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowInvite(false);
-    setEditUser(null);
-    setForm(emptyForm);
-    load();
   }
 
   async function handleDelete(user: AppUser) {
     if (!confirm(`Delete user "${user.name}"?`)) return;
-    await supabase.from('app_users').delete().eq('id', user.id);
+    setError(null);
+    const { error: err } = await supabase.from('app_users').delete().eq('id', user.id);
+    if (err) { setError(`Gagal menghapus user: ${err.message}`); return; }
     setActionUser(null);
-    load();
+    await load();
   }
 
   async function handleStatusChange(user: AppUser, status: AppUser['status']) {
-    await supabase.from('app_users').update({ status }).eq('id', user.id);
+    setError(null);
+    const { error: err } = await supabase.from('app_users').update({ status }).eq('id', user.id);
+    if (err) { setError(`Gagal mengubah status: ${err.message}`); return; }
     setActionUser(null);
-    load();
+    await load();
   }
 
   function openEdit(user: AppUser) {
@@ -86,6 +120,7 @@ export default function Users() {
 
   return (
     <div className="space-y-10">
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
       <div className="flex justify-between items-end">
         <div>
           <h2 className="text-4xl font-black font-headline tracking-tighter text-on-surface">Users & Roles</h2>
@@ -198,11 +233,16 @@ export default function Users() {
               <input required type="email" className={inputCls} placeholder="j.doe@ggf.com" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
             </Field>
           </div>
-          {!editUser && (
-            <Field label="Password">
-              <input required type="password" className={inputCls} placeholder="Min. 8 characters" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
-            </Field>
-          )}
+          <Field label={editUser ? 'Password Baru (kosongkan jika tidak diubah)' : 'Password'}>
+            <input
+              type="password"
+              required={!editUser}
+              className={inputCls}
+              placeholder={editUser ? 'Kosongkan jika tidak ingin diubah' : 'Min. 8 karakter'}
+              value={form.password}
+              onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+            />
+          </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Role">
               <select className={selectCls} value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as AppUser['role'] }))}>

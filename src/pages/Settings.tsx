@@ -3,6 +3,25 @@ import { Icons } from '../lib/icons';
 import { cn } from '../lib/utils';
 import { supabase } from '../lib/supabase';
 
+type Toast = { type: 'success' | 'error'; message: string };
+
+function ToastBanner({ toast, onClose }: { toast: Toast; onClose: () => void }) {
+  return (
+    <div className={cn(
+      'flex items-center gap-3 p-4 rounded-2xl text-sm font-medium border',
+      toast.type === 'success'
+        ? 'bg-primary/10 border-primary/20 text-primary'
+        : 'bg-error/10 border-error/20 text-error'
+    )}>
+      {toast.type === 'success'
+        ? <Icons.CheckCircle2 className="w-4 h-4 shrink-0" />
+        : <Icons.AlertTriangle className="w-4 h-4 shrink-0" />}
+      <span className="flex-1">{toast.message}</span>
+      <button onClick={onClose} className="opacity-60 hover:opacity-100 transition-opacity ml-2 font-bold">✕</button>
+    </div>
+  );
+}
+
 interface SettingsProps {
   darkMode: boolean;
   onToggleDark: () => void;
@@ -18,29 +37,51 @@ export default function Settings({ darkMode, onToggleDark }: SettingsProps) {
   const [saved, setSaved] = useState(false);
   const [language, setLanguage] = useState('English (US)');
   const [timezone, setTimezone] = useState('UTC +07:00 (Jakarta)');
+  const [toast, setToast] = useState<Toast | null>(null);
+
+  function showToast(type: Toast['type'], message: string) {
+    setToast({ type, message });
+    setTimeout(() => setToast(null), 4000);
+  }
 
   async function handleSave() {
     setSaving(true);
     await new Promise(r => setTimeout(r, 600)); // simulate save
     setSaving(false);
     setSaved(true);
+    showToast('success', 'Settings saved successfully.');
     setTimeout(() => setSaved(false), 2000);
   }
 
   async function handlePurgeLogs() {
     if (!confirm('This will permanently delete ALL telemetry logs. Are you sure?')) return;
-    await supabase.from('telemetry_logs').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    alert('All telemetry logs have been purged.');
+    const { error } = await supabase
+      .from('telemetry_logs')
+      .delete()
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      showToast('error', `Gagal menghapus logs: ${error.message}`);
+    } else {
+      showToast('success', 'All telemetry logs have been purged.');
+    }
   }
 
   async function handleDeactivateUnit() {
     if (!confirm('This will set ALL business units to Inactive. Are you sure?')) return;
-    await supabase.from('business_units').update({ status: 'Inactive' }).neq('id', '00000000-0000-0000-0000-000000000000');
-    alert('All business units have been deactivated.');
+    const { error } = await supabase
+      .from('business_units')
+      .update({ status: 'Inactive' })
+      .neq('id', '00000000-0000-0000-0000-000000000000');
+    if (error) {
+      showToast('error', `Gagal menonaktifkan units: ${error.message}`);
+    } else {
+      showToast('success', 'All business units have been deactivated.');
+    }
   }
 
   return (
     <div className="space-y-10">
+      {toast && <ToastBanner toast={toast} onClose={() => setToast(null)} />}
       <div>
         <h2 className="text-4xl font-black font-headline tracking-tighter text-on-surface">Settings</h2>
         <p className="text-on-surface-variant font-medium tracking-widest uppercase opacity-70 mt-1">System configuration and preferences</p>

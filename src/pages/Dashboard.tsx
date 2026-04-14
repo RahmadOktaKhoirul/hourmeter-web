@@ -6,7 +6,7 @@ import { Icons } from '../lib/icons';
 import { cn } from '../lib/utils';
 import {
   supabase, subscribeMachines, subscribeLogs,
-  type Machine, type TelemetryLog, type BusinessUnit, type DailyOperation,
+  type Machine, type TelemetryLog, type BusinessUnit,
 } from '../lib/supabase';
 import Modal, { Field, inputCls, selectCls } from '../components/Modal';
 
@@ -28,7 +28,8 @@ function timeAgo(dateStr: string) {
   if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `Today, ${new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-  return `Yesterday, ${new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  if (hrs < 48) return `Yesterday, ${new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+  return new Date(dateStr).toLocaleDateString();
 }
 
 // Bangun 7 hari (Senin s/d Minggu minggu ini)
@@ -39,19 +40,33 @@ function buildWeekDays(): { date: Date; label: string; key: string }[] {
   return Array.from({ length: 7 }, (_, i) => {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
     return {
       date: d,
       label: DAY_LABELS[i],
-      key: d.toISOString().slice(0, 10),
+      key: `${yyyy}-${mm}-${dd}`,
     };
   });
 }
 
 const emptyMachine = {
   machine_code: '', unit_name: '', serial_number: '', tier: 'Tier 4 Industrial',
-  business_unit_id: '', status: 'STOPPED' as const, service_status: 'OK' as const,
+  business_unit_id: '', status: 'STOPPED' as Machine['status'], service_status: 'OK' as Machine['service_status'],
   current_hm: 0, previous_hm: 0, hours_to_service: 500, service_interval: 500,
 };
+
+// Komponen error banner
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center gap-3 p-4 bg-error/10 border border-error/20 rounded-2xl text-sm text-error font-medium">
+      <Icons.AlertTriangle className="w-4 h-4 shrink-0" />
+      <span className="flex-1">{message}</span>
+      <button onClick={onClose} className="text-error/60 hover:text-error transition-colors ml-2 font-bold">✕</button>
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -63,6 +78,7 @@ export default function Dashboard() {
   const [showAddMachine, setShowAddMachine] = useState(false);
   const [form, setForm] = useState(emptyMachine);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: m }, { data: e }, { data: bu }] = await Promise.all([
@@ -82,34 +98,18 @@ export default function Dashboard() {
     const from = weekDays[0].key;
     const to   = weekDays[6].key;
 
-    // Coba dari daily_operation dulu
-    const { data: daily, error } = await supabase
-      .from('daily_operation')
-      .select('date, hours')
-      .gte('date', from)
-      .lte('date', to);
-
-    if (!error && daily) {
-      // Aggregate semua mesin per hari
-      const byDate: Record<string, number> = {};
-      daily.forEach((r: DailyOperation) => {
-        byDate[r.date] = (byDate[r.date] ?? 0) + Number(r.hours);
-      });
-      setChartData(weekDays.map(d => ({
-        name: d.label,
-        primary: Math.round((byDate[d.key] ?? 0) * 10) / 10,
-        idle: 0,
-      })));
-      return;
-    }
-
-    // Fallback: dari shifts
-    const { data: shifts } = await supabase
+    // Ambil data dari shifts
+    const { data: shifts, error } = await supabase
       .from('shifts')
       .select('started_at, hours_logged')
       .gte('started_at', from + 'T00:00:00')
       .lte('started_at', to + 'T23:59:59')
       .not('hours_logged', 'is', null);
+
+    if (error) {
+      console.error('Error loading shifts for chart:', error.message);
+      return;
+    }
 
     const byDate: Record<string, number> = {};
     (shifts ?? []).forEach((s: { started_at: string; hours_logged: number }) => {
@@ -146,25 +146,34 @@ export default function Dashboard() {
   async function handleAddMachine(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const { data: newMachine } = await supabase.from('machines').insert({
-      ...form,
-      business_unit_id: form.business_unit_id || null,
-      serial_number: form.serial_number || null,
-    }).select().single();
+    setError(null);
+    try {
+      const { data: newMachine, error: insertErr } = await supabase.from('machines').insert({
+        ...form,
+        business_unit_id: form.business_unit_id || null,
+        serial_number: form.serial_number || null,
+      }).select().single();
 
-    if (newMachine) {
-      // Insert log START
-      await supabase.from('telemetry_logs').insert({
-        machine_id: newMachine.id,
-        event_type: 'INFO',
-        title: `Machine ${form.machine_code} added to fleet`,
-        description: `Unit: ${form.unit_name}`,
-      });
+      if (insertErr) {
+        setError(`Gagal menambahkan mesin: ${insertErr.message}`);
+        return;
+      }
+
+      if (newMachine) {
+        // Log ini dijalankan tanpa ditunggu (fire-and-forget)
+        supabase.from('telemetry_logs').insert({
+          machine_id: newMachine.id,
+          event_type: 'INFO',
+          title: `Machine ${form.machine_code} added to fleet`,
+          description: `Unit: ${form.unit_name}`,
+        }).then(({ error: logErr }) => { if (logErr) console.error(logErr); });
+      }
+      setShowAddMachine(false);
+      setForm(emptyMachine);
+      await load();
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
-    setShowAddMachine(false);
-    setForm(emptyMachine);
-    load();
   }
 
   function exportCSV() {
@@ -175,7 +184,8 @@ export default function Dashboard() {
       m.status, m.service_status,
       m.last_mqtt_at ? new Date(m.last_mqtt_at).toLocaleString() : 'N/A',
     ]);
-    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    // Bungkus dengan tanda kutip agar koma pada tanggal/nama tidak merusak kolom CSV
+    const csv = [headers, ...rows].map(r => r.map(field => `"${field}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = 'fleet-status.csv'; a.click();
@@ -196,10 +206,9 @@ export default function Dashboard() {
     { label: 'Utilization', value: `${utilization}%`, change: utilization >= 90 ? 'OPTIMAL' : 'NORMAL', icon: Icons.TrendingUp, color: 'text-tertiary' },
   ];
 
-  const maxChart = Math.max(...chartData.map(d => d.primary), 1);
-
   return (
     <div className="space-y-8">
+      {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
       {/* KPI */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {kpis.map((kpi, i) => (
@@ -253,7 +262,7 @@ export default function Dashboard() {
                   <Tooltip
                     cursor={{ fill: 'rgba(84,224,131,0.05)' }}
                     contentStyle={{ backgroundColor: 'var(--c-surface-container-high)', border: 'none', borderRadius: '12px', color: 'var(--c-on-surface)' }}
-                    formatter={(v: number) => [`${v} h`, 'Operation']}
+                    formatter={(v) => [`${v ?? 0} h`, 'Operation']}
                   />
                   <Bar dataKey="primary" fill="var(--c-primary)" radius={[4, 4, 0, 0]} barSize={40} />
                 </BarChart>
@@ -274,7 +283,7 @@ export default function Dashboard() {
               : events.length === 0
                 ? <p className="text-sm text-on-surface-variant">No events yet.</p>
                 : events.map((event) => {
-                    const meta = eventIconMap[event.event_type];
+                    const meta = eventIconMap[event.event_type] || eventIconMap['INFO'];
                     return (
                       <div key={event.id} className="flex gap-4 group cursor-pointer" onClick={() => navigate('/machines')}>
                         <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110', meta.bgColor)}>
@@ -411,22 +420,22 @@ export default function Dashboard() {
           </Field>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Status">
-              <select className={selectCls} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as typeof form.status }))}>
+              <select className={selectCls} value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value as Machine['status'] }))}>
                 <option>RUNNING</option><option>STOPPED</option><option>MAINTENANCE</option>
               </select>
             </Field>
             <Field label="Service Status">
-              <select className={selectCls} value={form.service_status} onChange={e => setForm(f => ({ ...f, service_status: e.target.value as typeof form.service_status }))}>
+              <select className={selectCls} value={form.service_status} onChange={e => setForm(f => ({ ...f, service_status: e.target.value as Machine['service_status'] }))}>
                 <option>OK</option><option>OVERDUE</option><option>SCHEDULED</option>
               </select>
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Current HM (h)">
-              <input type="number" step="0.1" className={inputCls} value={form.current_hm} onChange={e => setForm(f => ({ ...f, current_hm: parseFloat(e.target.value) }))} />
+              <input type="number" step="0.1" className={inputCls} value={form.current_hm || ''} onChange={e => setForm(f => ({ ...f, current_hm: parseFloat(e.target.value) || 0 }))} />
             </Field>
             <Field label="Service Interval (h)">
-              <input type="number" className={inputCls} value={form.service_interval} onChange={e => setForm(f => ({ ...f, service_interval: parseInt(e.target.value) }))} />
+              <input type="number" className={inputCls} value={form.service_interval || ''} onChange={e => setForm(f => ({ ...f, service_interval: parseInt(e.target.value, 10) || 0 }))} />
             </Field>
           </div>
           <div className="flex justify-end gap-3 pt-2">

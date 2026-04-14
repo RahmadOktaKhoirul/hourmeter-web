@@ -33,6 +33,8 @@ create table public.machines (
   previous_hm numeric(10,1) not null default 0,
   hours_to_service numeric(10,1) default 500,
   service_interval numeric(10,1) default 500,
+  hm_seconds numeric default 0,
+  last_mqtt_at timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -141,6 +143,46 @@ create policy "allow_all" on public.shifts for all using (true) with check (true
 create policy "allow_all" on public.telemetry_logs for all using (true) with check (true);
 create policy "allow_all" on public.service_records for all using (true) with check (true);
 create policy "allow_all" on public.reports for all using (true) with check (true);
+
+-- ============================================================
+-- MQTT RPC FUNCTIONS
+-- ============================================================
+
+-- Function: Handle data telemetri real-time dari MQTT
+create or replace function public.upsert_machine_mqtt(
+  p_machine_code text,
+  p_hm_sec numeric,
+  p_prev_hm_sec numeric,
+  p_engine_running boolean,
+  p_client_id text
+) returns void
+language plpgsql security definer as $$
+begin
+  update public.machines
+  set
+    hm_seconds = p_hm_sec,
+    current_hm = round((p_hm_sec / 3600.0)::numeric, 1),
+    previous_hm = round((p_prev_hm_sec / 3600.0)::numeric, 1),
+    status = case when p_engine_running then 'RUNNING' else 'STOPPED' end,
+    last_mqtt_at = now()
+  where machine_code = p_machine_code;
+end;
+$$;
+
+-- Function: Handle log event dari MQTT
+create or replace function public.insert_mqtt_log(
+  p_machine_code text,
+  p_event text,
+  p_prev_hm_hours numeric,
+  p_timestamp text
+) returns void
+language plpgsql security definer as $$
+begin
+  insert into public.telemetry_logs (machine_id, event_type, title, description, created_at)
+  select id, p_event, 'MQTT Event: ' || p_event, 'Previous HM: ' || p_prev_hm_hours, coalesce(p_timestamp::timestamptz, now())
+  from public.machines where machine_code = p_machine_code;
+end;
+$$;
 
 -- ============================================================
 -- SEED DATA

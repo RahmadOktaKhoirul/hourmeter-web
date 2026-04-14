@@ -5,14 +5,24 @@ export default function TopBar({
   user,
   darkMode,
   onToggleDark,
+  onMenuOpen,
 }: {
   user: AppUser;
   darkMode: boolean;
   onToggleDark: () => void;
+  onMenuOpen?: () => void;
 }) {
   return (
     <header className="flex justify-between items-center w-full px-6 h-16 z-50 bg-surface border-b border-outline-variant/20 shrink-0">
       <div className="flex items-center gap-4 flex-1">
+        {/* Hamburger button — hanya muncul di mobile */}
+        <button
+          onClick={onMenuOpen}
+          className="md:hidden p-2 rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-primary transition-all shrink-0"
+          aria-label="Open navigation menu"
+        >
+          <Icons.Menu className="w-5 h-5" />
+        </button>
         <div className="relative w-full max-w-md group">
           <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-on-surface-variant group-focus-within:text-primary transition-colors" />
           <input
