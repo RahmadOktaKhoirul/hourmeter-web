@@ -85,67 +85,67 @@ export default function BusinessUnits() {
   }
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
-      <div className="flex justify-between items-end">
+      <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-4xl font-black font-headline tracking-tighter text-on-surface">Business Units</h2>
-          <p className="text-on-surface-variant font-medium tracking-widest uppercase opacity-70 mt-1">Regional operational clusters</p>
+          <h2 className="text-xl font-bold text-on-surface">Business Unit</h2>
+          <p className="text-sm text-on-surface-variant mt-0.5">Kluster operasional per wilayah</p>
         </div>
         <button onClick={() => { setEditUnit(null); setForm(emptyForm); setShowAdd(true); }}
-          className="px-6 py-3 bg-primary text-on-primary font-bold rounded-2xl shadow-xl shadow-primary/20 hover:opacity-90 transition-all uppercase tracking-widest text-xs flex items-center gap-2">
-          <Icons.Plus className="w-4 h-4" /> New Unit
+          className="px-3 py-1.5 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5">
+          <Icons.Plus className="w-4 h-4" /> Tambah Unit
         </button>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-64 bg-surface-container-low rounded-3xl animate-pulse" />)}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-48 bg-surface-container-low rounded-xl animate-pulse" />)}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {units.map((unit, i) => {
             const UnitIcon = unitIcons[i % unitIcons.length];
             return (
-              <motion.div key={unit.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.1 }}
-                className="bg-surface-container-low p-8 rounded-3xl border border-outline-variant/10 hover:bg-surface-container-high transition-all group cursor-pointer relative"
+              <motion.div key={unit.id} initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.07 }}
+                className="bg-surface-container-low p-6 rounded-xl border border-outline-variant/10 hover:border-outline-variant/30 hover:shadow-sm transition-all group cursor-pointer relative"
                 onClick={() => navigate('/machines')}
               >
                 {/* Action buttons */}
-                <div className="absolute top-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => openEdit(unit)} className="p-2 rounded-xl bg-surface-container-highest text-on-surface-variant hover:text-primary transition-all">
+                <div className="absolute top-4 right-4 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => openEdit(unit)} className="p-1.5 rounded-lg bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors">
                     <Icons.Settings className="w-4 h-4" />
                   </button>
-                  <button onClick={() => handleDelete(unit)} className="p-2 rounded-xl bg-surface-container-highest text-on-surface-variant hover:text-error transition-all">
+                  <button onClick={() => handleDelete(unit)} className="p-1.5 rounded-lg bg-surface-container-highest text-on-surface-variant hover:text-error transition-colors">
                     <Icons.AlertTriangle className="w-4 h-4" />
                   </button>
                 </div>
 
-                <div className="flex justify-between items-start mb-8">
-                  <div className="w-14 h-14 rounded-2xl bg-surface-container-highest flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                    <UnitIcon className="w-7 h-7 text-on-surface-variant group-hover:text-primary transition-colors" />
+                <div className="flex justify-between items-start mb-5">
+                  <div className="w-10 h-10 rounded-lg bg-surface-container-highest flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                    <UnitIcon className="w-5 h-5 text-on-surface-variant group-hover:text-primary transition-colors" />
                   </div>
-                  <span className={cn('text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest',
+                  <span className={cn('text-xs font-medium px-2 py-0.5 rounded-md',
                     unit.status === 'Active' ? 'bg-primary/10 text-primary' : 'bg-error/10 text-error'
                   )}>{unit.status}</span>
                 </div>
 
-                <h3 className="text-2xl font-headline font-bold text-on-surface mb-1">{unit.name}</h3>
-                <p className="text-sm text-on-surface-variant mb-8 flex items-center gap-2">
-                  <Icons.Globe className="w-4 h-4" /> {unit.location}
+                <h3 className="text-base font-semibold text-on-surface mb-0.5">{unit.name}</h3>
+                <p className="text-sm text-on-surface-variant mb-5 flex items-center gap-1.5">
+                  <Icons.Globe className="w-3.5 h-3.5" /> {unit.location}
                 </p>
 
-                <div className="grid grid-cols-2 gap-6 pt-6 border-t border-outline-variant/10">
+                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-outline-variant/10">
                   <div>
-                    <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Machines</p>
-                    <p className="text-2xl font-headline font-bold text-on-surface">{unit.machine_count}</p>
+                    <p className="text-xs text-on-surface-variant mb-1">Unit Alat</p>
+                    <p className="text-xl font-bold text-on-surface">{unit.machine_count}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest mb-1">Fleet Health</p>
+                    <p className="text-xs text-on-surface-variant mb-1">Kesehatan Fleet</p>
                     <div className="flex items-center gap-2">
-                      <p className="text-2xl font-headline font-bold text-primary">{unit.health}%</p>
+                      <p className="text-xl font-bold text-primary">{unit.health}%</p>
                       <div className="flex-1 h-1.5 bg-surface-container-highest rounded-full overflow-hidden">
-                        <div className="bg-primary h-full transition-all" style={{ width: `${unit.health}%` }} />
+                        <div className="bg-primary h-full transition-all duration-500" style={{ width: `${unit.health}%` }} />
                       </div>
                     </div>
                   </div>
@@ -157,12 +157,12 @@ export default function BusinessUnits() {
       )}
 
       {/* Add / Edit Modal */}
-      <Modal open={showAdd} onClose={() => { setShowAdd(false); setEditUnit(null); }} title={editUnit ? `Edit — ${editUnit.name}` : 'New Business Unit'}>
+      <Modal open={showAdd} onClose={() => { setShowAdd(false); setEditUnit(null); }} title={editUnit ? `Edit — ${editUnit.name}` : 'Business Unit Baru'}>
         <form onSubmit={handleSave} className="space-y-4">
-          <Field label="Unit Name">
+          <Field label="Nama Unit">
             <input required className={inputCls} placeholder="Central Mining Hub" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           </Field>
-          <Field label="Location">
+          <Field label="Lokasi">
             <input required className={inputCls} placeholder="Kalimantan" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
           </Field>
           <Field label="Status">
@@ -171,9 +171,9 @@ export default function BusinessUnits() {
             </select>
           </Field>
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => { setShowAdd(false); setEditUnit(null); }} className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">Cancel</button>
-            <button type="submit" disabled={saving} className="px-6 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-60">
-              {saving ? 'Saving...' : editUnit ? 'Save Changes' : 'Create Unit'}
+            <button type="button" onClick={() => { setShowAdd(false); setEditUnit(null); }} className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors">Batal</button>
+            <button type="submit" disabled={saving} className="px-5 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity">
+              {saving ? 'Menyimpan...' : editUnit ? 'Simpan' : 'Buat Unit'}
             </button>
           </div>
         </form>

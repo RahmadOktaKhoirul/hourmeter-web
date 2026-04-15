@@ -3,7 +3,7 @@ import { motion } from 'motion/react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Icons } from '../lib/icons';
 import { cn } from '../lib/utils';
-import { supabase, type Machine, type Shift, type TelemetryLog, type BusinessUnit } from '../lib/supabase';
+import { supabase, getWeeklyHMChart, subscribeHourMeter, type Machine, type Shift, type TelemetryLog, type BusinessUnit, type HourMeterLog } from '../lib/supabase';
 import Modal, { Field, inputCls, selectCls } from '../components/Modal';
 
 const DAY_LABELS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
@@ -53,7 +53,7 @@ export default function Machines() {
 
   const [serviceForm, setServiceForm] = useState({ performed_by: '', notes: '', next_service_hm: '' });
   const [shiftForm, setShiftForm] = useState({ operator_name: '', hm_start: '', hm_end: '' });
-  const [editForm, setEditForm] = useState<Partial<Machine>>({});
+  const [editForm, setEditForm] = useState<Partial<Machine & { unit_type: Machine['unit_type'] }>>({});
 
   async function loadMachines() {
     const { data, error: err } = await supabase
@@ -72,26 +72,36 @@ export default function Machines() {
     setLoading(false);
   }
 
-  // Load chart mingguan berdasarkan mesin yang dipilih
-  const loadChart = useCallback(async (machineId: string) => {
-    const weekDays = buildWeekDays();
-    const from = weekDays[0].key;
-    const to = weekDays[6].key;
+  // Load chart mingguan dari hour_meter_logs via RPC (jika device_id ada)
+  // Fallback ke shifts jika device_id belum dikonfigurasi
+  const loadChart = useCallback(async (machine: Machine) => {
     const todayKey = new Date().toISOString().slice(0, 10);
 
-    const { data: shiftsData, error: err } = await supabase
+    // Gunakan hour_meter_logs jika mesin punya device_id
+    if (machine.device_id) {
+      const data = await getWeeklyHMChart(machine.device_id);
+      if (data.length > 0) {
+        setChartData(data.map(d => ({
+          name: d.name,
+          hours: d.hours,
+          active: new Date().toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase() === d.name,
+        })));
+        return;
+      }
+    }
+
+    // Fallback: pakai shifts
+    const weekDays = buildWeekDays();
+    const from = weekDays[0].key;
+    const to   = weekDays[6].key;
+
+    const { data: shiftsData } = await supabase
       .from('shifts')
       .select('started_at, hours_logged')
-      .eq('machine_id', machineId)
+      .eq('machine_id', machine.id)
       .gte('started_at', from + 'T00:00:00')
       .lte('started_at', to + 'T23:59:59')
       .not('hours_logged', 'is', null);
-
-    if (err) {
-      // Chart gagal tidak perlu block UI, cukup tampilkan empty
-      setChartData(weekDays.map(d => ({ name: d.label, hours: 0, active: d.key === todayKey })));
-      return;
-    }
 
     const byDate: Record<string, number> = {};
     (shiftsData ?? []).forEach((s: { started_at: string; hours_logged: number }) => {
@@ -125,8 +135,22 @@ export default function Machines() {
       if (le) setError(`Gagal memuat log: ${le.message}`);
       else if (l) setLogs(l);
     });
-    loadChart(selected.id);
-  }, [selected, loadChart]);
+    loadChart(selected);
+
+    // Realtime: update status & HM dari hour_meter_logs jika device_id cocok
+    if (!selected.device_id) return;
+    const hmSub = subscribeHourMeter((log: HourMeterLog) => {
+      if (log.machine_id !== selected.device_id) return;
+      setSelected(prev => prev ? {
+        ...prev,
+        current_hm: log.hm_hours,
+        hm_seconds: log.hm_seconds,
+        status: log.status === 'RUNNING' ? 'RUNNING' : 'STOPPED',
+        last_mqtt_at: log.created_at,
+      } : prev);
+    });
+    return () => { hmSub.unsubscribe(); };
+  }, [selected?.id, loadChart]);
 
   async function handleScheduleService(e: React.FormEvent) {
     e.preventDefault();
@@ -273,26 +297,26 @@ export default function Machines() {
     : 0;
 
   const metrics = [
-    { label: 'Current HM', value: selected.current_hm.toLocaleString(), unit: 'h', sub: `+${(selected.current_hm - selected.previous_hm).toFixed(1)}h Today`, icon: Icons.TrendingUp, color: 'text-primary' },
-    { label: 'Previous HM', value: selected.previous_hm.toLocaleString(), unit: 'h', sub: 'Last Reading: 24h ago', icon: Icons.Timer, color: 'text-on-surface-variant' },
-    { label: '24h Delta', value: (selected.current_hm - selected.previous_hm).toFixed(1), unit: 'h', sub: 'Daily increment', icon: Icons.Activity, color: 'text-tertiary' },
-    { label: 'Hours to Service', value: String(selected.hours_to_service ?? 0), unit: 'h', sub: `${serviceProgress}% Interval Exhausted`, icon: Icons.Wrench, color: 'text-error', progress: serviceProgress },
+    { label: 'HM Saat Ini', value: selected.current_hm.toLocaleString(), unit: 'h', sub: `+${(selected.current_hm - selected.previous_hm).toFixed(1)}h hari ini`, icon: Icons.TrendingUp, color: 'text-primary', iconBg: 'bg-primary/10' },
+    { label: 'HM Sebelumnya', value: selected.previous_hm.toLocaleString(), unit: 'h', sub: 'Pembacaan sebelumnya', icon: Icons.Timer, color: 'text-on-surface-variant', iconBg: 'bg-surface-container-highest' },
+    { label: 'Delta 24 Jam', value: (selected.current_hm - selected.previous_hm).toFixed(1), unit: 'h', sub: 'Kenaikan harian', icon: Icons.Activity, color: 'text-tertiary', iconBg: 'bg-tertiary/10' },
+    { label: 'Sisa Menuju Service', value: String(selected.hours_to_service ?? 0), unit: 'h', sub: `${serviceProgress}% interval terpakai`, icon: Icons.Wrench, color: 'text-error', iconBg: 'bg-error/10', progress: serviceProgress },
   ];
 
   const totalWeeklyHours = chartData.reduce((s, d) => s + d.hours, 0);
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-6">
       {/* Error Banner */}
       {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
 
       {/* Machine selector */}
-      <div className="flex gap-3 overflow-x-auto pb-2">
+      <div className="flex gap-2 overflow-x-auto pb-1">
         {machines.map((m) => (
           <button key={m.id} onClick={() => setSelected(m)}
-            className={cn('px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest whitespace-nowrap transition-all',
+            className={cn('px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all',
               selected.id === m.id
-                ? 'bg-primary text-on-primary shadow-lg shadow-primary/20'
+                ? 'bg-primary text-on-primary'
                 : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface'
             )}>
             {m.machine_code}
@@ -301,29 +325,30 @@ export default function Machines() {
       </div>
 
       {/* Hero Header */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-end">
-        <div className="lg:col-span-8 flex flex-col gap-2">
-          <div className="flex items-center gap-4">
-            <span className={cn('w-3 h-3 rounded-full',
-              selected.status === 'RUNNING' ? 'bg-primary animate-pulse shadow-[0_0_12px_rgba(84,224,131,0.6)]' : 'bg-on-surface-variant'
+      <section className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-2">
+            <span className={cn('w-2 h-2 rounded-full',
+              selected.status === 'RUNNING' ? 'bg-primary animate-pulse' : 'bg-on-surface-variant/40'
             )} />
-            <span className={cn('font-headline font-bold text-sm tracking-[0.3em] uppercase',
+            <span className={cn('text-xs font-medium',
               selected.status === 'RUNNING' ? 'text-primary' : 'text-on-surface-variant'
             )}>
-              {selected.status}
+              {selected.status === 'RUNNING' ? 'Beroperasi' : selected.status === 'STOPPED' ? 'Berhenti' : 'Maintenance'}
             </span>
           </div>
-          <h2 className="text-6xl font-black font-headline tracking-tighter text-on-surface">{selected.machine_code}</h2>
-          <p className="text-on-surface-variant font-medium tracking-widest uppercase opacity-70">
-            Serial #{selected.serial_number ?? '—'} • {selected.tier ?? '—'} • {selected.business_units?.name ?? '—'}
+          <h2 className="text-2xl font-bold text-on-surface">{selected.machine_code}</h2>
+          <p className="text-sm text-on-surface-variant">
+            {selected.unit_name} · S/N {selected.serial_number ?? '—'} · {selected.business_units?.name ?? '—'}
           </p>
         </div>
-        <div className="lg:col-span-4 flex justify-end gap-3 flex-wrap">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => {
               setEditForm({
                 machine_code: selected.machine_code,
                 unit_name: selected.unit_name,
+                unit_type: selected.unit_type,
                 serial_number: selected.serial_number ?? '',
                 status: selected.status,
                 service_status: selected.service_status,
@@ -331,54 +356,59 @@ export default function Machines() {
                 previous_hm: selected.previous_hm,
                 hours_to_service: selected.hours_to_service ?? 500,
                 business_unit_id: selected.business_unit_id ?? '',
+                device_id: selected.device_id ?? '',
               });
               setShowEdit(true);
             }}
-            className="px-5 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all uppercase tracking-widest text-xs flex items-center gap-2"
+            className="px-4 py-2 bg-surface-container-high text-on-surface text-sm font-medium rounded-lg hover:bg-surface-container-highest transition-colors flex items-center gap-1.5"
           >
             <Icons.Settings className="w-4 h-4" /> Edit
           </button>
           <button onClick={generateReport}
-            className="px-5 py-3 bg-surface-container-high text-on-surface font-bold rounded-2xl hover:bg-surface-container-highest transition-all uppercase tracking-widest text-xs flex items-center gap-2">
-            <Icons.Download className="w-4 h-4" /> Report
+            className="px-4 py-2 bg-surface-container-high text-on-surface text-sm font-medium rounded-lg hover:bg-surface-container-highest transition-colors flex items-center gap-1.5">
+            <Icons.Download className="w-4 h-4" /> Laporan
           </button>
           <button
             onClick={() => { setServiceForm({ performed_by: '', notes: '', next_service_hm: '' }); setShowService(true); }}
-            className="px-5 py-3 bg-primary text-on-primary font-bold rounded-2xl shadow-xl shadow-primary/20 hover:opacity-90 transition-all uppercase tracking-widest text-xs flex items-center gap-2"
+            className="px-4 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 transition-opacity flex items-center gap-1.5"
           >
-            <Icons.Wrench className="w-4 h-4" /> Schedule Service
+            <Icons.Wrench className="w-4 h-4" /> Jadwalkan Service
           </button>
         </div>
       </section>
 
       {/* Metrics */}
-      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((metric, i) => (
           <motion.div key={metric.label}
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
-            className="bg-surface-container-low p-8 rounded-3xl flex flex-col justify-between min-h-[180px] group hover:bg-surface-container-high transition-all duration-300">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">{metric.label}</span>
-            <div className="text-5xl font-headline font-bold text-on-surface mt-2 tracking-tighter">
-              {metric.value}<span className="text-sm font-normal text-on-surface-variant ml-1">{metric.unit}</span>
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
+            className="bg-surface-container-low p-5 rounded-xl border border-outline-variant/10 hover:border-outline-variant/30 hover:shadow-sm transition-all">
+            <div className="flex items-start justify-between mb-4">
+              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', metric.iconBg)}>
+                <metric.icon className={cn('w-5 h-5', metric.color)} />
+              </div>
             </div>
-            <div className="mt-6 w-full">
+            <div className="flex items-baseline gap-1.5">
+              <span className={cn('text-3xl font-bold tracking-tight', metric.color)}>{metric.value}</span>
+              <span className="text-sm text-on-surface-variant">{metric.unit}</span>
+            </div>
+            <p className="text-sm font-medium text-on-surface mt-1">{metric.label}</p>
+            <div className="mt-2">
               {metric.progress !== undefined ? (
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase font-bold text-tertiary tracking-widest">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs text-on-surface-variant">
                     <span>{metric.sub}</span>
-                    <span>{metric.progress >= 90 ? 'Critical' : 'OK'}</span>
+                    <span className={metric.progress >= 90 ? 'text-error font-medium' : ''}>{metric.progress >= 90 ? 'Kritis' : 'Normal'}</span>
                   </div>
                   <div className="w-full bg-surface-container-highest h-1.5 rounded-full overflow-hidden">
                     <div
-                      className={cn('h-full rounded-full', metric.progress >= 90 ? 'bg-error' : 'bg-tertiary')}
+                      className={cn('h-full rounded-full transition-all duration-700', metric.progress >= 90 ? 'bg-error' : 'bg-tertiary')}
                       style={{ width: `${metric.progress}%` }}
                     />
                   </div>
                 </div>
               ) : (
-                <div className={cn('flex items-center gap-2 text-xs font-bold font-headline uppercase tracking-widest', metric.color)}>
-                  <metric.icon className="w-4 h-4" /><span>{metric.sub}</span>
-                </div>
+                <p className="text-xs text-on-surface-variant">{metric.sub}</p>
               )}
             </div>
           </motion.div>
@@ -386,12 +416,12 @@ export default function Machines() {
       </section>
 
       {/* Chart + Shifts */}
-      <section className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <div className="lg:col-span-8 bg-surface-container-low rounded-3xl p-10 flex flex-col gap-8">
+      <section className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8 bg-surface-container-low rounded-xl border border-outline-variant/10 p-6 flex flex-col gap-5">
           <div>
-            <h3 className="font-headline font-bold text-2xl text-on-surface tracking-tight">Weekly Operating Hours</h3>
-            <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-[0.2em] mt-1">
-              {selected.machine_code} · {totalWeeklyHours.toFixed(1)} h this week
+            <h3 className="font-semibold text-base text-on-surface">Jam Operasi Mingguan</h3>
+            <p className="text-xs text-on-surface-variant mt-0.5">
+              {selected.machine_code} · {totalWeeklyHours.toFixed(1)} jam minggu ini
             </p>
           </div>
           <div className="h-80 w-full">
@@ -428,9 +458,9 @@ export default function Machines() {
           </div>
         </div>
 
-        <div className="lg:col-span-4 bg-surface-container-low rounded-3xl p-10 flex flex-col gap-6">
+        <div className="lg:col-span-4 bg-surface-container-low rounded-xl border border-outline-variant/10 p-6 flex flex-col gap-4">
           <div className="flex justify-between items-center">
-            <h3 className="font-headline font-bold text-2xl text-on-surface tracking-tight">Recent Shifts</h3>
+            <h3 className="font-semibold text-base text-on-surface">Shift Terkini</h3>
             <button
               onClick={() => { setShiftForm({ operator_name: '', hm_start: String(selected.current_hm), hm_end: '' }); setShowShift(true); }}
               className="p-2 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-all"
@@ -440,20 +470,20 @@ export default function Machines() {
           </div>
           <div className="flex flex-col gap-2 flex-1">
             {shifts.length === 0
-              ? <p className="text-sm text-on-surface-variant">No shifts recorded.</p>
+              ? <p className="text-sm text-on-surface-variant">Belum ada shift.</p>
               : shifts.map((shift, i) => (
                   <div key={shift.id} className={cn(
-                    'grid grid-cols-2 py-4 px-6 rounded-2xl transition-all',
+                    'grid grid-cols-2 py-3 px-4 rounded-lg transition-all',
                     i === 0 ? 'bg-primary/10 border border-primary/20' : 'bg-surface-container-highest/30'
                   )}>
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Operator</span>
-                      <span className="text-sm font-bold text-on-surface">{shift.operator_name}</span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-on-surface-variant">Operator</span>
+                      <span className="text-sm font-medium text-on-surface">{shift.operator_name}</span>
                     </div>
-                    <div className="flex flex-col items-end">
-                      <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">Hours</span>
-                      <span className={cn('text-sm font-headline font-bold', i === 0 ? 'text-primary' : 'text-on-surface')}>
-                        {shift.hours_logged != null ? `${shift.hours_logged}h` : 'Active'}
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className="text-xs text-on-surface-variant">Jam</span>
+                      <span className={cn('text-sm font-semibold', i === 0 ? 'text-primary' : 'text-on-surface')}>
+                        {shift.hours_logged != null ? `${shift.hours_logged}h` : 'Aktif'}
                       </span>
                     </div>
                   </div>
@@ -463,27 +493,31 @@ export default function Machines() {
       </section>
 
       {/* Event Log */}
-      <section className="bg-surface-container-low rounded-3xl overflow-hidden">
-        <div className="p-8 border-b border-outline-variant/10 flex justify-between items-center">
-          <h3 className="font-headline font-bold text-2xl text-on-surface tracking-tight">Event Log</h3>
-          <span className="text-[10px] font-bold text-on-surface-variant uppercase tracking-widest">{logs.length} events</span>
+      <section className="bg-surface-container-low rounded-xl border border-outline-variant/10 overflow-hidden">
+        <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between items-center">
+          <h3 className="font-semibold text-base text-on-surface">Log Event</h3>
+          <span className="text-xs text-on-surface-variant">{logs.length} event</span>
         </div>
         <div className="divide-y divide-outline-variant/5 max-h-96 overflow-y-auto">
           {logs.length === 0
-            ? <p className="px-8 py-6 text-sm text-on-surface-variant">No events recorded.</p>
+            ? <p className="px-6 py-5 text-sm text-on-surface-variant">Belum ada event.</p>
             : logs.map((log) => (
-                <div key={log.id} className="px-8 py-5 flex items-center gap-6 hover:bg-surface-container-high/30 transition-colors">
+                <div key={log.id} className="px-6 py-4 flex items-center gap-4 hover:bg-surface-container-high/30 transition-colors">
                   <span className={cn(
-                    'text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-widest shrink-0',
-                    log.event_type === 'ALERT' ? 'bg-error/10 text-error' :
+                    'text-xs font-medium px-2 py-0.5 rounded-md shrink-0',
+                    log.event_type === 'ALERT'   ? 'bg-error/10 text-error' :
+                    log.event_type === 'RESET'   ? 'bg-error/10 text-error' :
                     log.event_type === 'SERVICE' ? 'bg-primary/10 text-primary' :
+                    log.event_type === 'START'   ? 'bg-primary/10 text-primary' :
+                    log.event_type === 'BOOT'    ? 'bg-primary/10 text-primary' :
+                    log.event_type === 'ADJUST'  ? 'bg-tertiary/10 text-tertiary' :
                     'bg-surface-container-highest text-on-surface-variant'
                   )}>{log.event_type}</span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-on-surface truncate">{log.title}</p>
+                    <p className="text-sm font-medium text-on-surface truncate">{log.title}</p>
                     {log.description && <p className="text-xs text-on-surface-variant mt-0.5 truncate">{log.description}</p>}
                   </div>
-                  <span className="text-[10px] text-on-surface-variant font-bold uppercase tracking-widest shrink-0">
+                  <span className="text-xs text-on-surface-variant shrink-0">
                     {new Date(log.created_at).toLocaleString()}
                   </span>
                 </div>
@@ -494,7 +528,7 @@ export default function Machines() {
       {/* Schedule Service Modal */}
       <Modal open={showService} onClose={() => setShowService(false)} title={`Schedule Service — ${selected.machine_code}`}>
         <form onSubmit={handleScheduleService} className="space-y-4">
-          <div className="p-4 bg-surface-container-high rounded-2xl text-sm text-on-surface-variant">
+          <div className="p-4 bg-surface-container-high rounded-lg text-sm text-on-surface-variant">
             Current HM: <span className="font-bold text-on-surface">{selected.current_hm}h</span> &nbsp;|&nbsp;
             Service Status: <span className={cn('font-bold', selected.service_status === 'OK' ? 'text-primary' : 'text-error')}>{selected.service_status}</span>
           </div>
@@ -515,12 +549,12 @@ export default function Machines() {
           </Field>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowService(false)}
-              className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">
-              Cancel
+              className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors">
+              Batal
             </button>
             <button type="submit" disabled={saving}
-              className="px-6 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-60">
-              {saving ? 'Saving...' : 'Schedule Service'}
+              className="px-5 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity">
+              {saving ? 'Menyimpan...' : 'Jadwalkan Service'}
             </button>
           </div>
         </form>
@@ -546,37 +580,47 @@ export default function Machines() {
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowShift(false)}
-              className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">
-              Cancel
+              className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors">
+              Batal
             </button>
             <button type="submit" disabled={saving}
-              className="px-6 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-60">
-              {saving ? 'Saving...' : 'Log Shift'}
+              className="px-5 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity">
+              {saving ? 'Menyimpan...' : 'Simpan Shift'}
             </button>
           </div>
         </form>
       </Modal>
 
-      {/* Edit Machine Modal */}
-      <Modal open={showEdit} onClose={() => setShowEdit(false)} title={`Edit Machine — ${selected.machine_code}`}>
+      {/* Edit Unit Modal */}
+      <Modal open={showEdit} onClose={() => setShowEdit(false)} title={`Edit Unit — ${selected.machine_code}`}>
         <form onSubmit={handleEditMachine} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Machine Code">
+            <Field label="Kode Unit">
               <input required className={inputCls} value={editForm.machine_code ?? ''}
                 onChange={e => setEditForm(f => ({ ...f, machine_code: e.target.value }))} />
             </Field>
-            <Field label="Unit Name">
+            <Field label="Nama Unit">
               <input required className={inputCls} value={editForm.unit_name ?? ''}
                 onChange={e => setEditForm(f => ({ ...f, unit_name: e.target.value }))} />
             </Field>
           </div>
-          <Field label="Business Unit">
-            <select className={selectCls} value={editForm.business_unit_id ?? ''}
-              onChange={e => setEditForm(f => ({ ...f, business_unit_id: e.target.value || null }))}>
-              <option value="">— None —</option>
-              {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
-            </select>
-          </Field>
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Tipe Unit">
+              <select className={inputCls} value={editForm.unit_type ?? ''}
+                onChange={e => setEditForm(f => ({ ...f, unit_type: e.target.value as Machine['unit_type'] }))}>
+                <option value="">— Pilih Tipe —</option>
+                <option value="BSC">BSC</option>
+                <option value="BDF">BDF</option>
+              </select>
+            </Field>
+            <Field label="Business Unit">
+              <select className={selectCls} value={editForm.business_unit_id ?? ''}
+                onChange={e => setEditForm(f => ({ ...f, business_unit_id: e.target.value || null }))}>
+                <option value="">— None —</option>
+                {businessUnits.map(bu => <option key={bu.id} value={bu.id}>{bu.name}</option>)}
+              </select>
+            </Field>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <Field label="Status">
               <select className={selectCls} value={editForm.status ?? 'STOPPED'}
@@ -601,14 +645,22 @@ export default function Machines() {
                 onChange={e => setEditForm(f => ({ ...f, hours_to_service: parseFloat(e.target.value) }))} />
             </Field>
           </div>
+          <Field label="Device ID (dari hour_meter_logs)">
+            <input className={inputCls} placeholder="machine_1"
+              value={editForm.device_id ?? ''}
+              onChange={e => setEditForm(f => ({ ...f, device_id: e.target.value || null }))} />
+            <p className="text-xs text-on-surface-variant mt-1">
+              Isi sesuai nilai machine_id di tabel hour_meter_logs (contoh: machine_1)
+            </p>
+          </Field>
           <div className="flex justify-end gap-3 pt-2">
             <button type="button" onClick={() => setShowEdit(false)}
-              className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">
-              Cancel
+              className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors">
+              Batal
             </button>
             <button type="submit" disabled={saving}
-              className="px-6 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-60">
-              {saving ? 'Saving...' : 'Save Changes'}
+              className="px-5 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity">
+              {saving ? 'Menyimpan...' : 'Simpan Perubahan'}
             </button>
           </div>
         </form>

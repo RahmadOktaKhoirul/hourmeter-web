@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-headline: "Space Grotesk", sans-serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-headline: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
 
   /* Primary - hijau tetap sama di kedua mode */
   --color-primary: var(--c-primary);
@@ -40,79 +40,89 @@
 
 /* ── LIGHT MODE (default) ─────────────────────────────── */
 :root {
-  --c-primary: #1a9e4f;
-  --c-primary-container: #d6f5e3;
+  --c-primary: #1a7a42;
+  --c-primary-container: #d0ead9;
   --c-on-primary: #ffffff;
-  --c-on-primary-container: #003918;
-  --c-primary-fixed-dim: #157a3d;
+  --c-on-primary-container: #00391a;
+  --c-primary-fixed-dim: #145f33;
 
-  --c-secondary: #4a7c59;
-  --c-secondary-container: #d0e8d8;
+  --c-secondary: #466855;
+  --c-secondary-container: #cce3d5;
   --c-on-secondary: #ffffff;
 
-  --c-tertiary: #c2185b;
-  --c-tertiary-container: #fce4ec;
+  --c-tertiary: #2563eb;
+  --c-tertiary-container: #dbeafe;
 
-  --c-error: #b3261e;
+  --c-error: #c0392b;
   --c-error-container: #fde8e7;
   --c-on-error: #ffffff;
 
-  --c-background: #f5f7f5;
+  --c-background: #f4f5f4;
   --c-surface: #ffffff;
-  --c-surface-container-lowest: #f0f4f1;
-  --c-surface-container-low: #f7faf8;
-  --c-surface-container: #eef2ef;
-  --c-surface-container-high: #e4ebe6;
-  --c-surface-container-highest: #d8e2da;
-  --c-surface-variant: #e4ebe6;
+  --c-surface-container-lowest: #eff2f0;
+  --c-surface-container-low: #f8faf9;
+  --c-surface-container: #edf0ee;
+  --c-surface-container-high: #e3e8e4;
+  --c-surface-container-highest: #d5ddd7;
+  --c-surface-variant: #e3e8e4;
 
-  --c-on-surface: #1a1c1a;
-  --c-on-surface-variant: #3d4a3e;
-  --c-outline: #6b7c6d;
-  --c-outline-variant: #b0c4b3;
+  --c-on-surface: #161816;
+  --c-on-surface-variant: #424842;
+  --c-outline: #6b756c;
+  --c-outline-variant: #adbdaf;
 }
 
 /* ── DARK MODE ────────────────────────────────────────── */
 .dark {
-  --c-primary: #54e083;
-  --c-primary-container: #007f3e;
-  --c-on-primary: #003918;
-  --c-on-primary-container: #c7ffce;
-  --c-primary-fixed-dim: #3dbd6a;
+  /* Primary lebih kalem — bukan neon */
+  --c-primary: #3db870;
+  --c-primary-container: #0d5c30;
+  --c-on-primary: #ffffff;
+  --c-on-primary-container: #b6e8cb;
+  --c-primary-fixed-dim: #2e9a5c;
 
-  --c-secondary: #bacbb9;
-  --c-secondary-container: #3e4d3f;
-  --c-on-secondary: #263427;
+  --c-secondary: #9abaa6;
+  --c-secondary-container: #2d3d31;
+  --c-on-secondary: #1a2b1e;
 
-  --c-tertiary: #ffb1c7;
-  --c-tertiary-container: #b14b6f;
+  --c-tertiary: #93b4f8;
+  --c-tertiary-container: #1e3a7a;
 
-  --c-error: #ffb4ab;
-  --c-error-container: #93000a;
-  --c-on-error: #690005;
+  --c-error: #f28b82;
+  --c-error-container: #7a1c14;
+  --c-on-error: #ffffff;
 
-  --c-background: #131313;
-  --c-surface: #131313;
-  --c-surface-container-lowest: #0e0e0e;
-  --c-surface-container-low: #1c1b1b;
-  --c-surface-container: #201f1f;
-  --c-surface-container-high: #2a2a2a;
-  --c-surface-container-highest: #353534;
-  --c-surface-variant: #2a2a2a;
+  --c-background: #111211;
+  --c-surface: #111211;
+  --c-surface-container-lowest: #0c0d0c;
+  --c-surface-container-low: #191a19;
+  --c-surface-container: #1e201e;
+  --c-surface-container-high: #262826;
+  --c-surface-container-highest: #313331;
+  --c-surface-variant: #262826;
 
-  --c-on-surface: #e5e2e1;
-  --c-on-surface-variant: #bfcaba;
-  --c-outline: #8a9485;
-  --c-outline-variant: #40493d;
+  --c-on-surface: #dfe1de;
+  --c-on-surface-variant: #b0b8b1;
+  --c-outline: #7a847a;
+  --c-outline-variant: #363d36;
 }
 
 @layer base {
   body {
     @apply bg-background text-on-surface font-sans antialiased transition-colors duration-300;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
   h1, h2, h3, h4, h5, h6, .font-headline {
     @apply font-headline;
+    font-feature-settings: "cv02", "cv03", "cv04";
+  }
+
+  /* Input & select lebih natural */
+  input, select, textarea {
+    font-feature-settings: "cv02", "cv03";
   }
 }
 

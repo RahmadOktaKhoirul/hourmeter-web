@@ -29,19 +29,19 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
             onClick={onClose}
           />
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={{ opacity: 0, scale: 0.97, y: 8 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ duration: 0.2 }}
-            className="relative z-10 w-full max-w-lg bg-surface rounded-3xl shadow-2xl border border-outline-variant/20 overflow-hidden"
+            exit={{ opacity: 0, scale: 0.97, y: 8 }}
+            transition={{ duration: 0.18 }}
+            className="relative z-10 w-full max-w-lg bg-surface rounded-2xl shadow-xl border border-outline-variant/20 overflow-hidden"
           >
-            <div className="flex items-center justify-between px-8 py-6 border-b border-outline-variant/10">
-              <h2 className="text-xl font-headline font-bold text-on-surface tracking-tight">{title}</h2>
-              <button onClick={onClose} className="p-2 rounded-xl text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all">
-                <Icons.ChevronRight className="w-5 h-5 rotate-180" />
+            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/10">
+              <h2 className="text-base font-semibold text-on-surface">{title}</h2>
+              <button onClick={onClose} className="p-1.5 rounded-lg text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface transition-all">
+                <Icons.X className="w-4 h-4" />
               </button>
             </div>
-            <div className="px-8 py-6">{children}</div>
+            <div className="px-6 py-5">{children}</div>
           </motion.div>
         </div>
       )}
@@ -53,11 +53,11 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
 export function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <label className="block text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">{label}</label>
+      <label className="block text-xs font-medium text-on-surface-variant">{label}</label>
       {children}
     </div>
   );
 }
 
-export const inputCls = "w-full bg-surface-container-high border border-outline-variant/20 rounded-xl px-4 py-3 text-sm text-on-surface focus:ring-2 focus:ring-primary/40 outline-none transition-all";
+export const inputCls = "w-full bg-surface-container-low border border-outline-variant/30 rounded-lg px-3 py-2.5 text-sm text-on-surface focus:ring-2 focus:ring-primary/30 focus:border-primary/50 outline-none transition-all";
 export const selectCls = inputCls + " appearance-none cursor-pointer";

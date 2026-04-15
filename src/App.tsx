@@ -4,9 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import type { AppUser } from './lib/supabase';
+import { can } from './lib/rbac';
 
 import Sidebar from './components/Sidebar';
 import TopBar from './components/TopBar';
@@ -18,7 +19,28 @@ import Users from './pages/Users';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
+import MasterUnits from './pages/master/MasterUnits';
+import MasterUsers from './pages/master/MasterUsers';
+import ServiceSchedule from './pages/master/ServiceSchedule';
+import RBAC from './pages/master/RBAC';
 
+// ── Halaman yang dilindungi permission tertentu ───────────────
+function ProtectedRoute({
+  permId,
+  children,
+  user,
+}: {
+  permId: string;
+  children: React.ReactNode;
+  user: AppUser;
+}) {
+  if (!can(user.role, permId)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
+// ── Layout utama setelah login ────────────────────────────────
 function Layout({
   children, user, onLogout, darkMode, onToggleDark,
 }: {
@@ -40,6 +62,7 @@ function Layout({
     <div className="flex h-screen w-full bg-background overflow-hidden">
       <Sidebar
         onLogout={onLogout}
+        userRole={user.role}
         mobileOpen={mobileMenuOpen}
         onMobileClose={() => setMobileMenuOpen(false)}
       />
@@ -69,6 +92,106 @@ function Layout({
   );
 }
 
+// ── Inner router — pakai useNavigate untuk redirect setelah login ─
+function AppRoutes({
+  user,
+  onLogin,
+  onLogout,
+  darkMode,
+  onToggleDark,
+}: {
+  user: AppUser | null;
+  onLogin: (u: AppUser) => void;
+  onLogout: () => void;
+  darkMode: boolean;
+  onToggleDark: () => void;
+}) {
+  const navigate = useNavigate();
+
+  function handleLogin(u: AppUser) {
+    onLogin(u);
+    // Selalu kembali ke Home setelah login
+    navigate('/', { replace: true });
+  }
+
+  function handleLogout() {
+    onLogout();
+    // Kembali ke root agar Login tampil bersih
+    navigate('/', { replace: true });
+  }
+
+  if (!user) {
+    return (
+      <Login
+        onLogin={handleLogin}
+        darkMode={darkMode}
+        onToggleDark={onToggleDark}
+      />
+    );
+  }
+
+  return (
+    <Layout
+      user={user}
+      onLogout={handleLogout}
+      darkMode={darkMode}
+      onToggleDark={onToggleDark}
+    >
+      <Routes>
+        {/* ── Main routes ─────────────────────────────── */}
+        <Route path="/" element={
+          <ProtectedRoute permId="dashboard.view" user={user}>
+            <Dashboard />
+          </ProtectedRoute>
+        } />
+        <Route path="/machines" element={
+          <ProtectedRoute permId="machines.view" user={user}>
+            <Machines />
+          </ProtectedRoute>
+        } />
+        <Route path="/business-units" element={<BusinessUnits />} />
+        <Route path="/users" element={<Users />} />
+        <Route path="/reports" element={
+          <ProtectedRoute permId="reports.view" user={user}>
+            <Reports />
+          </ProtectedRoute>
+        } />
+        <Route path="/settings" element={
+          <ProtectedRoute permId="settings.view" user={user}>
+            <Settings darkMode={darkMode} onToggleDark={onToggleDark} />
+          </ProtectedRoute>
+        } />
+
+        {/* ── Master routes ────────────────────────────── */}
+        <Route path="/master/units" element={
+          <ProtectedRoute permId="master.units" user={user}>
+            <MasterUnits />
+          </ProtectedRoute>
+        } />
+        <Route path="/master/users" element={
+          <ProtectedRoute permId="master.users" user={user}>
+            <MasterUsers />
+          </ProtectedRoute>
+        } />
+        <Route path="/master/service-schedule" element={
+          <ProtectedRoute permId="master.service" user={user}>
+            <ServiceSchedule />
+          </ProtectedRoute>
+        } />
+        <Route path="/master/rbac" element={
+          <ProtectedRoute permId="master.rbac" user={user}>
+            <RBAC />
+          </ProtectedRoute>
+        } />
+
+        {/* ── Fallback ─────────────────────────────────── */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(() => {
     const saved = localStorage.getItem('hm_user');
@@ -97,21 +220,13 @@ export default function App() {
   return (
     <div className={darkMode ? 'dark' : ''}>
       <Router>
-        {!user ? (
-          <Login onLogin={setUser} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />
-        ) : (
-          <Layout user={user} onLogout={() => setUser(null)} darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)}>
-            <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/machines" element={<Machines />} />
-              <Route path="/business-units" element={<BusinessUnits />} />
-              <Route path="/users" element={<Users />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/settings" element={<Settings darkMode={darkMode} onToggleDark={() => setDarkMode(d => !d)} />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </Layout>
-        )}
+        <AppRoutes
+          user={user}
+          onLogin={setUser}
+          onLogout={() => setUser(null)}
+          darkMode={darkMode}
+          onToggleDark={() => setDarkMode(d => !d)}
+        />
       </Router>
     </div>
   );

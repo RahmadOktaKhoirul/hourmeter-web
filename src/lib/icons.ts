@@ -40,7 +40,13 @@ import {
   EyeOff,
   Factory,
   Menu,
-  X
+  X,
+  ChevronDown,
+  List,
+  Shield,
+  RefreshCcw,
+  Power,
+  SlidersHorizontal
 } from 'lucide-react';
 
 export const Icons = {
@@ -86,4 +92,10 @@ export const Icons = {
   Factory: Factory,
   Menu: Menu,
   X: X,
+  ChevronDown: ChevronDown,
+  List: List,
+  Shield: Shield,
+  Reset: RefreshCcw,
+  Power: Power,
+  Sliders: SlidersHorizontal,
 };

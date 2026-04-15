@@ -5,8 +5,8 @@ import { motion } from 'motion/react';
 import { Icons } from '../lib/icons';
 import { cn } from '../lib/utils';
 import {
-  supabase, subscribeMachines, subscribeLogs,
-  type Machine, type TelemetryLog, type BusinessUnit,
+  supabase, subscribeMachines, subscribeLogs, subscribeHourMeter, getLatestHMPerMachine,
+  type Machine, type TelemetryLog, type BusinessUnit, type LatestHM,
 } from '../lib/supabase';
 import Modal, { Field, inputCls, selectCls } from '../components/Modal';
 
@@ -19,6 +19,9 @@ const eventIconMap: Record<TelemetryLog['event_type'], { icon: React.ElementType
   OPERATOR_SWAP: { icon: Icons.Users,         color: 'text-on-surface-variant', bgColor: 'bg-surface-container-highest' },
   SERVICE:       { icon: Icons.BadgeCheck,    color: 'text-primary',            bgColor: 'bg-primary/10' },
   INFO:          { icon: Icons.Activity,      color: 'text-on-surface-variant', bgColor: 'bg-surface-container-highest' },
+  RESET:         { icon: Icons.Reset,         color: 'text-error',              bgColor: 'bg-error/10' },
+  ADJUST:        { icon: Icons.Sliders,       color: 'text-tertiary',           bgColor: 'bg-tertiary/10' },
+  BOOT:          { icon: Icons.Power,         color: 'text-primary',            bgColor: 'bg-primary/10' },
 };
 
 function timeAgo(dateStr: string) {
@@ -52,7 +55,8 @@ function buildWeekDays(): { date: Date; label: string; key: string }[] {
 }
 
 const emptyMachine = {
-  machine_code: '', unit_name: '', serial_number: '', tier: 'Tier 4 Industrial',
+  machine_code: '', unit_name: '', unit_type: '' as Machine['unit_type'],
+  serial_number: '', tier: '',
   business_unit_id: '', status: 'STOPPED' as Machine['status'], service_status: 'OK' as Machine['service_status'],
   current_hm: 0, previous_hm: 0, hours_to_service: 500, service_interval: 500,
 };
@@ -71,6 +75,7 @@ function ErrorBanner({ message, onClose }: { message: string; onClose: () => voi
 export default function Dashboard() {
   const navigate = useNavigate();
   const [machines, setMachines] = useState<Machine[]>([]);
+  const [latestHM, setLatestHM] = useState<Record<string, LatestHM>>({});
   const [events, setEvents] = useState<TelemetryLog[]>([]);
   const [businessUnits, setBusinessUnits] = useState<BusinessUnit[]>([]);
   const [chartData, setChartData] = useState<{ name: string; primary: number; idle: number }[]>([]);
@@ -89,6 +94,13 @@ export default function Dashboard() {
     if (m) setMachines(m);
     if (e) setEvents(e);
     if (bu) setBusinessUnits(bu);
+
+    // Ambil status terbaru per mesin dari hour_meter_logs
+    const latest = await getLatestHMPerMachine();
+    const map: Record<string, LatestHM> = {};
+    latest.forEach(l => { map[l.machine_id] = l; });
+    setLatestHM(map);
+
     setLoading(false);
   }, []);
 
@@ -137,9 +149,21 @@ export default function Dashboard() {
       setEvents(prev => [newLog, ...prev].slice(0, 4));
     });
 
+    // Realtime: update status terbaru dari hour_meter_logs
+    const hmSub = subscribeHourMeter((log) => {
+      setLatestHM(prev => ({ ...prev, [log.machine_id]: {
+        machine_id: log.machine_id,
+        hm_seconds: log.hm_seconds,
+        hm_hours: log.hm_hours,
+        status: log.status,
+        last_seen_at: log.created_at,
+      }}));
+    });
+
     return () => {
       machineSub.unsubscribe();
       logSub.unsubscribe();
+      hmSub.unsubscribe();
     };
   }, [load, loadChart]);
 
@@ -200,189 +224,192 @@ export default function Dashboard() {
   const weeklyHours = chartData.reduce((s, d) => s + d.primary, 0);
 
   const kpis = [
-    { label: 'Total Machines', value: String(totalMachines), change: `${running} running`, icon: Icons.Machines, color: 'text-primary', onClick: () => navigate('/machines') },
-    { label: 'Weekly Hours', value: weeklyHours >= 1000 ? `${(weeklyHours / 1000).toFixed(1)}k` : weeklyHours.toFixed(1), change: 'this week', icon: Icons.Timer, color: 'text-on-surface' },
-    { label: 'Due for Service', value: String(dueForService).padStart(2, '0'), change: 'CRITICAL', icon: Icons.Wrench, color: 'text-error', highlight: true, onClick: () => navigate('/machines') },
-    { label: 'Utilization', value: `${utilization}%`, change: utilization >= 90 ? 'OPTIMAL' : 'NORMAL', icon: Icons.TrendingUp, color: 'text-tertiary' },
+    { label: 'Total Unit', value: String(totalMachines), sub: `${running} beroperasi`, icon: Icons.Machines, color: 'text-primary', iconBg: 'bg-primary/10', onClick: () => navigate('/machines') },
+    { label: 'Jam Operasi Minggu Ini', value: weeklyHours >= 1000 ? `${(weeklyHours / 1000).toFixed(1)}k` : weeklyHours.toFixed(1), sub: 'jam minggu ini', icon: Icons.Timer, color: 'text-on-surface', iconBg: 'bg-surface-container-highest' },
+    { label: 'Perlu Service', value: String(dueForService), sub: 'unit overdue', icon: Icons.Wrench, color: 'text-error', iconBg: 'bg-error/10', highlight: true, onClick: () => navigate('/machines') },
+    { label: 'Utilisasi Fleet', value: `${utilization}%`, sub: utilization >= 90 ? 'Optimal' : 'Normal', icon: Icons.TrendingUp, color: 'text-tertiary', iconBg: 'bg-tertiary/10' },
   ];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {error && <ErrorBanner message={error} onClose={() => setError(null)} />}
-      {/* KPI */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {kpis.map((kpi, i) => (
-          <motion.div key={kpi.label} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: i * 0.1 }}
-            className={cn('bg-surface-container-low p-6 rounded-2xl relative overflow-hidden group hover:bg-surface-container-high transition-all duration-300', kpi.onClick && 'cursor-pointer')}
+          <motion.div key={kpi.label}
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.07 }}
+            className={cn('bg-surface-container-low p-5 rounded-xl border border-outline-variant/10 group hover:border-outline-variant/30 hover:shadow-sm transition-all', kpi.onClick && 'cursor-pointer')}
             onClick={kpi.onClick}
           >
-            <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
-              <kpi.icon className="w-16 h-16" />
+            <div className="flex items-start justify-between mb-4">
+              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', kpi.iconBg)}>
+                <kpi.icon className={cn('w-5 h-5', kpi.color)} />
+              </div>
+              {kpi.onClick && (
+                <Icons.ArrowRight className="w-4 h-4 text-on-surface-variant/20 group-hover:text-primary group-hover:translate-x-0.5 transition-all" />
+              )}
             </div>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-1">{kpi.label}</p>
-            <div className="flex items-baseline gap-2">
-              <h2 className={cn('text-4xl font-headline font-bold tracking-tighter', kpi.color)}>{kpi.value}</h2>
-              <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded-md uppercase tracking-widest', kpi.highlight ? 'bg-error/20 text-error' : 'bg-primary/20 text-primary')}>
-                {kpi.change}
-              </span>
-            </div>
+            <span className={cn('text-3xl font-bold tracking-tight', kpi.color)}>{kpi.value}</span>
+            <p className="text-sm font-medium text-on-surface mt-1">{kpi.label}</p>
+            <p className={cn('text-xs mt-0.5', kpi.highlight ? 'text-error' : 'text-on-surface-variant')}>
+              {kpi.sub}
+            </p>
           </motion.div>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Weekly Chart — dari daily_operation nyata */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="lg:col-span-8 bg-surface-container-low p-8 rounded-3xl flex flex-col">
-          <div className="flex justify-between items-center mb-10">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Weekly Chart */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="lg:col-span-8 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10 flex flex-col">
+          <div className="flex justify-between items-center mb-6">
             <div>
-              <h3 className="font-headline font-bold text-2xl tracking-tight text-on-surface">Weekly Operation Hours</h3>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant mt-1">
-                Fleet-wide • {weeklyHours.toFixed(1)} h this week
-              </p>
+              <h3 className="font-semibold text-base text-on-surface">Jam Operasi Mingguan</h3>
+              <p className="text-xs text-on-surface-variant mt-0.5">{weeklyHours.toFixed(1)} jam total minggu ini</p>
             </div>
-            <div className="flex gap-4">
-              <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                <span className="w-2 h-2 rounded-full bg-primary" /> Operation
-              </span>
-            </div>
+            <span className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+              <span className="w-2 h-2 rounded-full bg-primary" /> Operasi
+            </span>
           </div>
-          <div className="flex-1 h-80 w-full">
+          <div className="flex-1 h-72 w-full">
             {chartData.length === 0 || weeklyHours === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center gap-3 text-on-surface-variant">
-                <Icons.Activity className="w-10 h-10 opacity-20" />
-                <p className="text-sm font-medium">No operation data this week</p>
-                <p className="text-xs opacity-60">Data will appear when machines are running</p>
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-on-surface-variant">
+                <Icons.Activity className="w-8 h-8 opacity-20" />
+                <p className="text-sm">Belum ada data operasi minggu ini</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-outline-variant)" opacity={0.3} />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--c-on-surface-variant)', fontSize: 10, fontWeight: 700 }} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--c-on-surface-variant)', fontSize: 10, fontWeight: 700 }} unit="h" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--c-outline-variant)" opacity={0.4} />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: 'var(--c-on-surface-variant)', fontSize: 11 }} dy={8} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: 'var(--c-on-surface-variant)', fontSize: 11 }} unit="h" />
                   <Tooltip
-                    cursor={{ fill: 'rgba(84,224,131,0.05)' }}
-                    contentStyle={{ backgroundColor: 'var(--c-surface-container-high)', border: 'none', borderRadius: '12px', color: 'var(--c-on-surface)' }}
-                    formatter={(v) => [`${v ?? 0} h`, 'Operation']}
+                    cursor={{ fill: 'var(--c-surface-container-high)', radius: 4 }}
+                    contentStyle={{ backgroundColor: 'var(--c-surface)', border: '1px solid var(--c-outline-variant)', borderRadius: '8px', color: 'var(--c-on-surface)', fontSize: '13px' }}
+                    formatter={(v) => [`${v ?? 0} jam`, 'Operasi']}
                   />
-                  <Bar dataKey="primary" fill="var(--c-primary)" radius={[4, 4, 0, 0]} barSize={40} />
+                  <Bar dataKey="primary" fill="var(--c-primary)" radius={[3, 3, 0, 0]} barSize={36} />
                 </BarChart>
               </ResponsiveContainer>
             )}
           </div>
         </motion.div>
 
-        {/* Recent Events — realtime */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-4 bg-surface-container-low p-8 rounded-3xl flex flex-col">
-          <div className="flex items-center justify-between mb-8">
-            <h3 className="font-headline font-bold text-2xl tracking-tight text-on-surface">Recent Events</h3>
-            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" title="Live" />
+        {/* Recent Events */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="lg:col-span-4 bg-surface-container-low p-6 rounded-xl border border-outline-variant/10 flex flex-col">
+          <div className="flex items-center justify-between mb-5">
+            <h3 className="font-semibold text-base text-on-surface">Event Terkini</h3>
+            <span className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" /> Live
+            </span>
           </div>
-          <div className="space-y-8 flex-1">
+          <div className="space-y-4 flex-1">
             {loading
-              ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 bg-surface-container-high rounded-xl animate-pulse" />)
+              ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-10 bg-surface-container-high rounded-lg animate-pulse" />)
               : events.length === 0
-                ? <p className="text-sm text-on-surface-variant">No events yet.</p>
+                ? <p className="text-sm text-on-surface-variant">Belum ada event.</p>
                 : events.map((event) => {
                     const meta = eventIconMap[event.event_type] || eventIconMap['INFO'];
                     return (
-                      <div key={event.id} className="flex gap-4 group cursor-pointer" onClick={() => navigate('/machines')}>
-                        <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110', meta.bgColor)}>
-                          <meta.icon className={cn('w-5 h-5', meta.color)} />
+                      <div key={event.id} className="flex gap-3 group cursor-pointer" onClick={() => navigate('/machines')}>
+                        <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', meta.bgColor)}>
+                          <meta.icon className={cn('w-4 h-4', meta.color)} />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-sm font-bold text-on-surface group-hover:text-primary transition-colors truncate">{event.title}</p>
-                          <p className="text-[10px] text-on-surface-variant uppercase font-bold tracking-widest mt-1 opacity-70">{timeAgo(event.created_at)}</p>
+                          <p className="text-sm font-medium text-on-surface group-hover:text-primary transition-colors truncate">{event.title}</p>
+                          <p className="text-xs text-on-surface-variant mt-0.5">{timeAgo(event.created_at)}</p>
                         </div>
                       </div>
                     );
                   })}
           </div>
-          <button onClick={() => navigate('/machines')} className="mt-10 pt-6 border-t border-outline-variant/10 text-primary text-[10px] font-bold uppercase tracking-[0.2em] hover:underline text-left flex items-center gap-2 group">
-            View all logs <Icons.ArrowRight className="w-3 h-3 group-hover:translate-x-1 transition-transform" />
+          <button onClick={() => navigate('/machines')} className="mt-4 pt-4 border-t border-outline-variant/10 text-xs text-primary hover:underline text-left flex items-center gap-1.5 group">
+            Lihat semua log <Icons.ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
           </button>
         </motion.div>
 
-        {/* Fleet Table — dengan indikator MQTT live */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="lg:col-span-12 bg-surface-container-low rounded-3xl overflow-hidden">
-          <div className="p-8 border-b border-outline-variant/10 flex justify-between items-center">
+        {/* Fleet Table */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="lg:col-span-12 bg-surface-container-low rounded-xl border border-outline-variant/10 overflow-hidden">
+          <div className="px-6 py-4 border-b border-outline-variant/10 flex justify-between items-center">
             <div>
-              <h3 className="font-headline font-bold text-2xl tracking-tight text-on-surface">Active Fleet Status</h3>
-              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant mt-1">
-                Live data from MQTT · auto-updates
-              </p>
+              <h3 className="font-semibold text-base text-on-surface">Status Fleet Aktif</h3>
+              <p className="text-xs text-on-surface-variant mt-0.5">Data live via MQTT · diperbarui otomatis</p>
             </div>
-            <div className="flex gap-3">
-              <button onClick={exportCSV} className="px-4 py-2 rounded-xl bg-surface-container-high text-[10px] font-bold uppercase tracking-widest text-on-surface-variant hover:bg-surface-container-highest transition-colors flex items-center gap-2">
+            <div className="flex gap-2">
+              <button onClick={exportCSV} className="px-3 py-1.5 rounded-lg bg-surface-container-high text-xs font-medium text-on-surface-variant hover:bg-surface-container-highest transition-colors flex items-center gap-1.5">
                 <Icons.Download className="w-3.5 h-3.5" /> Export CSV
               </button>
-              <button onClick={() => setShowAddMachine(true)} className="px-4 py-2 rounded-xl bg-primary text-on-primary text-[10px] font-bold uppercase tracking-widest hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg shadow-primary/10">
-                <Icons.Plus className="w-4 h-4" /> Add Machine
+              <button onClick={() => setShowAddMachine(true)} className="px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5">
+                <Icons.Plus className="w-3.5 h-3.5" /> Tambah Unit
               </button>
             </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant border-b border-outline-variant/10">
-                  <th className="px-8 py-6">Machine ID</th>
-                  <th className="px-8 py-6">Unit</th>
-                  <th className="px-8 py-6">Business Unit</th>
-                  <th className="px-8 py-6 text-right">HM (Hours)</th>
-                  <th className="px-8 py-6">Engine</th>
-                  <th className="px-8 py-6 text-center">Service</th>
-                  <th className="px-8 py-6 text-center">Last Update</th>
+                <tr className="text-xs font-medium text-on-surface-variant border-b border-outline-variant/10 bg-surface-container-high/40">
+                  <th className="px-6 py-3">Kode Unit</th>
+                  <th className="px-6 py-3">Nama Unit</th>
+                  <th className="px-6 py-3">Business Unit</th>
+                  <th className="px-6 py-3 text-right">HM (Jam)</th>
+                  <th className="px-6 py-3">Status</th>
+                  <th className="px-6 py-3 text-center">Service</th>
+                  <th className="px-6 py-3 text-center">Terakhir Update</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-outline-variant/5">
                 {loading
                   ? Array.from({ length: 5 }).map((_, i) => (
-                      <tr key={i}><td colSpan={7} className="px-8 py-6"><div className="h-4 bg-surface-container-high rounded animate-pulse" /></td></tr>
+                      <tr key={i}><td colSpan={7} className="px-6 py-4"><div className="h-4 bg-surface-container-high rounded animate-pulse" /></td></tr>
                     ))
                   : machines.map((item) => {
-                      const isLive = item.last_mqtt_at
-                        ? (Date.now() - new Date(item.last_mqtt_at).getTime()) < 60000
+                      // Prioritaskan data dari hour_meter_logs jika device_id terhubung
+                      const liveData = item.device_id ? latestHM[item.device_id] : null;
+                      const displayHM    = liveData ? liveData.hm_hours    : item.current_hm;
+                      const displayStatus = liveData ? liveData.status     : item.status;
+                      const lastSeen      = liveData ? liveData.last_seen_at : item.last_mqtt_at;
+                      const isLive = lastSeen
+                        ? (Date.now() - new Date(lastSeen).getTime()) < 120000
                         : false;
                       return (
                         <tr key={item.id} onClick={() => navigate('/machines')} className="hover:bg-surface-container-high/30 transition-colors group cursor-pointer">
-                          <td className="px-8 py-5">
+                          <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
-                              <span className="font-headline font-bold text-on-surface group-hover:text-primary transition-colors">{item.machine_code}</span>
-                              {isLive && <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" title="Live MQTT" />}
+                              <span className="text-sm font-semibold text-on-surface group-hover:text-primary transition-colors">{item.machine_code}</span>
+                              {isLive && <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" title="Live" />}
                             </div>
                           </td>
-                          <td className="px-8 py-5 text-sm text-on-surface-variant font-medium">{item.unit_name}</td>
-                          <td className="px-8 py-5 text-sm text-on-surface-variant font-medium">{item.business_units?.name ?? '—'}</td>
-                          <td className="px-8 py-5 text-right">
-                            <span className="font-headline font-bold text-on-surface">{Number(item.current_hm).toLocaleString('en-US', { minimumFractionDigits: 1 })}</span>
-                            {item.hm_seconds !== undefined && (
-                              <span className="block text-[10px] text-on-surface-variant opacity-60">
-                                {item.hm_seconds.toLocaleString()} sec
-                              </span>
+                          <td className="px-6 py-4 text-sm text-on-surface-variant">{item.unit_name}</td>
+                          <td className="px-6 py-4 text-sm text-on-surface-variant">{item.business_units?.name ?? '—'}</td>
+                          <td className="px-6 py-4 text-right">
+                            <span className="text-sm font-semibold text-on-surface">
+                              {Number(displayHM).toLocaleString('en-US', { minimumFractionDigits: 1 })}
+                            </span>
+                            {liveData && (
+                              <span className="block text-xs text-primary/70">live</span>
                             )}
                           </td>
-                          <td className="px-8 py-5">
+                          <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
-                              <span className={cn('w-2 h-2 rounded-full',
-                                item.status === 'RUNNING' ? 'bg-primary animate-pulse' : 'bg-on-surface-variant'
+                              <span className={cn('w-1.5 h-1.5 rounded-full',
+                                displayStatus === 'RUNNING' ? 'bg-primary animate-pulse' : 'bg-on-surface-variant/40'
                               )} />
-                              <span className={cn('text-[10px] font-bold uppercase tracking-widest',
-                                item.status === 'RUNNING' ? 'text-primary' : 'text-on-surface-variant'
-                              )}>{item.status}</span>
+                              <span className={cn('text-xs font-medium',
+                                displayStatus === 'RUNNING' ? 'text-primary' : 'text-on-surface-variant'
+                              )}>{displayStatus === 'RUNNING' ? 'Beroperasi' : displayStatus === 'STOPPED' ? 'Berhenti' : 'Maintenance'}</span>
                             </div>
                           </td>
-                          <td className="px-8 py-5 text-center">
-                            <span className={cn('text-[10px] font-bold px-2 py-1 rounded-lg uppercase tracking-widest',
-                              item.service_status === 'OK' ? 'bg-primary/10 text-primary' :
+                          <td className="px-6 py-4 text-center">
+                            <span className={cn('text-xs font-medium px-2 py-0.5 rounded-md',
+                              item.service_status === 'OK'        ? 'bg-primary/10 text-primary' :
                               item.service_status === 'SCHEDULED' ? 'bg-tertiary/10 text-tertiary' :
                               'bg-error/10 text-error'
                             )}>
-                              {item.service_status}
+                              {item.service_status === 'OK' ? 'OK' : item.service_status === 'SCHEDULED' ? 'Terjadwal' : 'Overdue'}
                             </span>
                           </td>
-                          <td className="px-8 py-5 text-center text-[10px] text-on-surface-variant font-medium">
-                            {item.last_mqtt_at
-                              ? timeAgo(item.last_mqtt_at)
-                              : <span className="opacity-40">No MQTT</span>}
+                          <td className="px-6 py-4 text-center text-xs text-on-surface-variant">
+                            {lastSeen ? timeAgo(lastSeen) : <span className="opacity-40">—</span>}
                           </td>
                         </tr>
                       );
@@ -394,22 +421,26 @@ export default function Dashboard() {
       </div>
 
       {/* Add Machine Modal */}
-      <Modal open={showAddMachine} onClose={() => setShowAddMachine(false)} title="Add New Machine">
+      <Modal open={showAddMachine} onClose={() => setShowAddMachine(false)} title="Tambah Unit Baru">
         <form onSubmit={handleAddMachine} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Machine Code">
-              <input required className={inputCls} placeholder="EXC-001-A" value={form.machine_code} onChange={e => setForm(f => ({ ...f, machine_code: e.target.value }))} />
+            <Field label="Kode Unit">
+              <input required className={inputCls} placeholder="BSC-001-A" value={form.machine_code} onChange={e => setForm(f => ({ ...f, machine_code: e.target.value }))} />
             </Field>
-            <Field label="Unit Name">
-              <input required className={inputCls} placeholder="Excavator Series 7" value={form.unit_name} onChange={e => setForm(f => ({ ...f, unit_name: e.target.value }))} />
+            <Field label="Nama Unit">
+              <input required className={inputCls} placeholder="Bulldozer Komatsu D65" value={form.unit_name} onChange={e => setForm(f => ({ ...f, unit_name: e.target.value }))} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
+            <Field label="Tipe Unit">
+              <select className={inputCls} value={form.unit_type ?? ''} onChange={e => setForm(f => ({ ...f, unit_type: e.target.value as Machine['unit_type'] }))}>
+                <option value="">— Pilih Tipe —</option>
+                <option value="BSC">BSC</option>
+                <option value="BDF">BDF</option>
+              </select>
+            </Field>
             <Field label="Serial Number">
               <input className={inputCls} placeholder="24-AG-01" value={form.serial_number} onChange={e => setForm(f => ({ ...f, serial_number: e.target.value }))} />
-            </Field>
-            <Field label="Tier">
-              <input className={inputCls} placeholder="Tier 4 Industrial" value={form.tier} onChange={e => setForm(f => ({ ...f, tier: e.target.value }))} />
             </Field>
           </div>
           <Field label="Business Unit">
@@ -439,9 +470,9 @@ export default function Dashboard() {
             </Field>
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <button type="button" onClick={() => setShowAddMachine(false)} className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest text-on-surface-variant hover:text-on-surface transition-colors">Cancel</button>
-            <button type="submit" disabled={saving} className="px-6 py-2.5 bg-primary text-on-primary font-bold rounded-xl text-xs uppercase tracking-widest hover:opacity-90 disabled:opacity-60">
-              {saving ? 'Saving...' : 'Add Machine'}
+            <button type="button" onClick={() => setShowAddMachine(false)} className="px-4 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface transition-colors">Batal</button>
+            <button type="submit" disabled={saving} className="px-5 py-2 bg-primary text-on-primary text-sm font-medium rounded-lg hover:opacity-90 disabled:opacity-60 transition-opacity">
+              {saving ? 'Menyimpan...' : 'Tambah Unit'}
             </button>
           </div>
         </form>

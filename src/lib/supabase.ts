@@ -26,9 +26,11 @@ export type Machine = {
   id: string;
   machine_code: string;
   unit_name: string;
+  unit_type: 'BSC' | 'BDF' | null;   // tipe unit alat berat
   serial_number: string | null;
   tier: string | null;
   business_unit_id: string | null;
+  device_id: string | null;           // mapping ke hour_meter_logs.machine_id
   status: 'RUNNING' | 'STOPPED' | 'MAINTENANCE';
   service_status: 'OK' | 'OVERDUE' | 'SCHEDULED';
   current_hm: number;
@@ -36,15 +38,29 @@ export type Machine = {
   hours_to_service: number | null;
   service_interval: number | null;
   created_at: string;
-  // Kolom MQTT (tersedia setelah migration_mqtt.sql dijalankan)
   hm_seconds?: number;
-  engine_running?: boolean;
-  tick_ms?: number;
-  shift_hours?: number;
   last_mqtt_at?: string | null;
-  mqtt_client_id?: string | null;
-  mqtt_topic?: string | null;
   business_units?: Pick<BusinessUnit, 'id' | 'name' | 'location'>;
+};
+
+// Data log dari IoT device (tabel hour_meter_logs)
+export type HourMeterLog = {
+  id: number;
+  created_at: string;
+  machine_id: string;       // teks seperti "machine_1"
+  hm_seconds: number;
+  hm_hours: number;
+  status: 'RUNNING' | 'STOPPED';
+  timestamp_device: string;
+};
+
+// Row hasil get_latest_hm_per_machine()
+export type LatestHM = {
+  machine_id: string;
+  hm_seconds: number;
+  hm_hours: number;
+  status: 'RUNNING' | 'STOPPED';
+  last_seen_at: string;
 };
 
 export type AppUser = {
@@ -76,7 +92,7 @@ export type Shift = {
 export type TelemetryLog = {
   id: string;
   machine_id: string;
-  event_type: 'ALERT' | 'START' | 'STOP' | 'OPERATOR_SWAP' | 'SERVICE' | 'INFO';
+  event_type: 'ALERT' | 'START' | 'STOP' | 'OPERATOR_SWAP' | 'SERVICE' | 'INFO' | 'RESET' | 'ADJUST' | 'BOOT';
   title: string;
   description: string | null;
   created_at: string;
@@ -152,4 +168,29 @@ export function subscribeLogs(onInsert: (log: TelemetryLog) => void) {
       (payload) => onInsert(payload.new as TelemetryLog)
     )
     .subscribe();
+}
+
+// ── Realtime: subscribe ke hour_meter_logs baru ───────────
+export function subscribeHourMeter(onInsert: (log: HourMeterLog) => void) {
+  return supabase
+    .channel('hour-meter-realtime')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'hour_meter_logs' },
+      (payload) => onInsert(payload.new as HourMeterLog)
+    )
+    .subscribe();
+}
+
+// ── Ambil status terbaru per mesin dari hour_meter_logs ───
+export async function getLatestHMPerMachine(): Promise<LatestHM[]> {
+  const { data } = await supabase.rpc('get_latest_hm_per_machine');
+  return (data ?? []) as LatestHM[];
+}
+
+// ── Ambil data chart mingguan dari hour_meter_logs ────────
+export async function getWeeklyHMChart(deviceId: string): Promise<{ name: string; hours: number }[]> {
+  const { data } = await supabase.rpc('get_weekly_hm_chart', { p_machine_id: deviceId });
+  return (data ?? []).map((r: { day_label: string; op_hours: number }) => ({
+    name: r.day_label,
+    hours: Number(r.op_hours),
+  }));
 }
